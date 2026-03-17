@@ -28,6 +28,7 @@ from datetime import datetime
 from openai import OpenAI
 
 from src.agents.controller import get_agent_action
+from src.db.database import set_season_winner
 
 # Lazy singleton — same pattern as controller.py; defers instantiation until first use.
 _openai_client: OpenAI | None = None
@@ -104,15 +105,17 @@ class GameEngine:
         memory:      MemoryManager    | None = None,
         broadcaster: EventBroadcaster | None = None,
         chroma_store: ChromaMemoryStore | None = None,
+        season_id:   int | None = None,
     ) -> None:
-        self.registry    = registry    or AgentRegistry()
+        self.season_id   = season_id
+        self.registry    = registry or AgentRegistry()
         # Wire ChromaDB into memory — create a default store unless one is injected.
         # Pass memory=MemoryManager() (no args) to disable long-term memory in tests.
         if memory is not None:
             self.memory = memory
         else:
-            store = chroma_store or ChromaMemoryStore()
-            self.memory = MemoryManager(chroma_store=store)
+            store = chroma_store or ChromaMemoryStore(season_id=season_id)
+            self.memory = MemoryManager(chroma_store=store, season_id=season_id)
         self.broadcaster = broadcaster or EventBroadcaster()
 
         # Set by run_challenge(); cleared after run_tribal_council()
@@ -135,18 +138,27 @@ class GameEngine:
           - Initialize database connections.
           - Announce the start of the game in the Public Chat.
         """
-        # Idempotency guard — safe to call on a resumed game without re-seeding.
+        # Idempotency guard — scoped to this season so a new season can be
+        # initialized even when rows from previous seasons exist.
         with get_session() as session:
-            if session.query(Agent).first():
+            query = session.query(Agent)
+            if self.season_id is not None:
+                query = query.filter(Agent.season_id == self.season_id)
+            if query.first():
                 logger.warning(
-                    "initialize_game() called on a non-empty database — skipping seed. "
-                    "Drop the DB file and restart to begin a fresh game."
+                    f"initialize_game() called on a non-empty database for season "
+                    f"{self.season_id} — skipping seed. Use --new-season to start fresh."
                 )
                 return
 
         with get_session() as session:
-            # GameState row (only one active row at a time)
-            gs = GameState(current_day=1, current_phase="morning_chat", is_active=True)
+            # GameState row (one active row per season)
+            gs = GameState(
+                season_id=self.season_id,
+                current_day=1,
+                current_phase="morning_chat",
+                is_active=True,
+            )
             session.add(gs)
 
             # Seed the 'game_master' pseudo-agent so ChatLog FK constraint is satisfied
@@ -154,6 +166,7 @@ class GameEngine:
             # appears in active-agent queries.
             gm = Agent(
                 agent_id="game_master",
+                season_id=self.season_id,
                 display_name="Game Master",
                 is_eliminated=True,
             )
@@ -163,6 +176,7 @@ class GameEngine:
             for config in self.registry.all_agents():
                 agent = Agent(
                     agent_id=config.agent_id,
+                    season_id=self.season_id,
                     display_name=config.display_name,
                     is_eliminated=False,
                 )
@@ -522,12 +536,10 @@ class GameEngine:
 
         # Pull complete day transcript from ChatLog once; filter per-agent below
         with get_session() as session:
-            all_logs = (
-                session.query(ChatLog)
-                .filter(ChatLog.day_number == day)
-                .order_by(ChatLog.timestamp.asc())
-                .all()
-            )
+            query = session.query(ChatLog).filter(ChatLog.day_number == day)
+            if self.season_id is not None:
+                query = query.filter(ChatLog.season_id == self.season_id)
+            all_logs = query.order_by(ChatLog.timestamp.asc()).all()
             # Detach-safe: capture needed fields before session closes
             log_snapshots = [
                 {
@@ -599,7 +611,10 @@ class GameEngine:
 
         # Advance the game day
         with get_session() as session:
-            gs = session.query(GameState).filter(GameState.is_active.is_(True)).first()
+            query = session.query(GameState).filter(GameState.is_active.is_(True))
+            if self.season_id is not None:
+                query = query.filter(GameState.season_id == self.season_id)
+            gs = query.first()
             gs.current_day  += 1
             gs.current_phase = "morning_chat"
 
@@ -646,6 +661,13 @@ class GameEngine:
                 self.broadcaster.broadcast_system_event(
                     victory_msg, day, "night_consolidation"
                 )
+                # Record the winner on the Season row
+                if self.season_id is not None:
+                    set_season_winner(
+                        self.season_id,
+                        winner.agent_id,
+                        winner.display_name,
+                    )
                 logger.info(
                     f"\n{'=' * 60}\n"
                     f"=== GAME OVER — WINNER: {winner.display_name} ({winner.agent_id}) ===\n"
@@ -770,26 +792,23 @@ class GameEngine:
     # ------------------------------------------------------------------
 
     def _active_agents(self) -> list[Agent]:
-        """Return all non-eliminated, non-game_master agents from the DB."""
+        """Return all non-eliminated, non-game_master agents for the current season."""
         with get_session() as session:
-            return (
-                session.query(Agent)
-                .filter(
-                    Agent.is_eliminated.is_(False),
-                    Agent.agent_id != "game_master",
-                )
-                .order_by(Agent.agent_id)
-                .all()
+            query = session.query(Agent).filter(
+                Agent.is_eliminated.is_(False),
+                Agent.agent_id != "game_master",
             )
+            if self.season_id is not None:
+                query = query.filter(Agent.season_id == self.season_id)
+            return query.order_by(Agent.agent_id).all()
 
     def _current_day(self) -> int:
-        """Return current_day from the active GameState row."""
+        """Return current_day from the active GameState row for this season."""
         with get_session() as session:
-            gs = (
-                session.query(GameState)
-                .filter(GameState.is_active.is_(True))
-                .first()
-            )
+            query = session.query(GameState).filter(GameState.is_active.is_(True))
+            if self.season_id is not None:
+                query = query.filter(GameState.season_id == self.season_id)
+            gs = query.first()
             return gs.current_day if gs else 1
 
     # ------------------------------------------------------------------
@@ -797,13 +816,12 @@ class GameEngine:
     # ------------------------------------------------------------------
 
     def _set_phase(self, phase: str) -> None:
-        """Update GameState.current_phase."""
+        """Update GameState.current_phase for this season."""
         with get_session() as session:
-            gs = (
-                session.query(GameState)
-                .filter(GameState.is_active.is_(True))
-                .first()
-            )
+            query = session.query(GameState).filter(GameState.is_active.is_(True))
+            if self.season_id is not None:
+                query = query.filter(GameState.season_id == self.season_id)
+            gs = query.first()
             if gs:
                 gs.current_phase = phase
 
@@ -817,6 +835,7 @@ class GameEngine:
         """Insert a ChatLog row for a completed agent action."""
         with get_session() as session:
             session.add(ChatLog(
+                season_id=self.season_id,
                 timestamp=datetime.utcnow(),
                 day_number=day,
                 phase=phase,
@@ -831,6 +850,7 @@ class GameEngine:
         """Insert a system_event ChatLog row (Game Master announcement)."""
         with get_session() as session:
             session.add(ChatLog(
+                season_id=self.season_id,
                 timestamp=datetime.utcnow(),
                 day_number=self._current_day(),
                 phase=phase,
@@ -850,6 +870,7 @@ class GameEngine:
         """Insert a VoteHistory row."""
         with get_session() as session:
             session.add(VoteHistory(
+                season_id=self.season_id,
                 day_number=day,
                 voter_agent_id=voter_agent_id,
                 target_agent_id=target_agent_id,

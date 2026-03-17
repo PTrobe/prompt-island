@@ -26,8 +26,8 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
-from src.db.database import get_session
-from src.db.models import Agent, ChatLog, GameState
+from src.db.database import get_session, list_seasons
+from src.db.models import Agent, ChatLog, GameState, Season
 
 logger = logging.getLogger(__name__)
 
@@ -113,56 +113,93 @@ app = FastAPI(title="Prompt Island API", version="0.1.0", lifespan=_lifespan)
 # ---------------------------------------------------------------------------
 
 
+@app.get("/seasons")
+async def get_seasons() -> JSONResponse:
+    """List all seasons with metadata."""
+    return JSONResponse(list_seasons())
+
+
 @app.get("/state")
 async def get_state() -> JSONResponse:
-    """Return current game state: day, phase, active agents, eliminated agents."""
+    """Return state for the currently active season."""
     with get_session() as session:
-        gs = session.query(GameState).filter(GameState.is_active.is_(True)).first()
-        agents = (
-            session.query(Agent)
-            .filter(Agent.agent_id != "game_master")
-            .order_by(Agent.agent_id)
-            .all()
-        )
-        state = {
-            "current_day":   gs.current_day   if gs else None,
-            "current_phase": gs.current_phase if gs else None,
-            "contestants": [
-                {
-                    "agent_id":         a.agent_id,
-                    "display_name":     a.display_name,
-                    "is_eliminated":    a.is_eliminated,
-                    "eliminated_on_day": a.eliminated_on_day,
-                }
-                for a in agents
-            ],
-        }
-    return JSONResponse(state)
+        active_season = session.query(Season).filter(Season.is_active.is_(True)).first()
+        season_id = active_season.id if active_season else None
+        return JSONResponse(_state_for_season(session, season_id))
+
+
+@app.get("/seasons/{season_id}/state")
+async def get_season_state(season_id: int) -> JSONResponse:
+    """Return game state for a specific season."""
+    with get_session() as session:
+        return JSONResponse(_state_for_season(session, season_id))
 
 
 @app.get("/logs")
 async def get_logs(limit: int = 50) -> JSONResponse:
-    """Return the last `limit` ChatLog rows as a list of event dicts."""
+    """Return the last `limit` events for the currently active season."""
     with get_session() as session:
-        logs = (
-            session.query(ChatLog)
-            .order_by(ChatLog.timestamp.desc())
-            .limit(limit)
-            .all()
-        )
-        rows = [
+        active_season = session.query(Season).filter(Season.is_active.is_(True)).first()
+        season_id = active_season.id if active_season else None
+        return JSONResponse(_logs_for_season(session, season_id, limit))
+
+
+@app.get("/seasons/{season_id}/logs")
+async def get_season_logs(season_id: int, limit: int = 50) -> JSONResponse:
+    """Return the last `limit` events for a specific season."""
+    with get_session() as session:
+        return JSONResponse(_logs_for_season(session, season_id, limit))
+
+
+# ---------------------------------------------------------------------------
+# Shared query helpers
+# ---------------------------------------------------------------------------
+
+def _state_for_season(session, season_id) -> dict:
+    query = session.query(GameState).filter(GameState.is_active.is_(True))
+    if season_id is not None:
+        query = query.filter(GameState.season_id == season_id)
+    gs = query.first()
+
+    agent_query = session.query(Agent).filter(Agent.agent_id != "game_master")
+    if season_id is not None:
+        agent_query = agent_query.filter(Agent.season_id == season_id)
+    agents = agent_query.order_by(Agent.agent_id).all()
+
+    return {
+        "season_id":     season_id,
+        "current_day":   gs.current_day   if gs else None,
+        "current_phase": gs.current_phase if gs else None,
+        "contestants": [
             {
-                "timestamp":       log.timestamp.isoformat(),
-                "day_number":      log.day_number,
-                "phase":           log.phase,
-                "agent_id":        log.agent_id,
-                "action_type":     log.action_type,
-                "target_agent_id": log.target_agent_id,
-                "message":         log.message,
+                "agent_id":          a.agent_id,
+                "display_name":      a.display_name,
+                "is_eliminated":     a.is_eliminated,
+                "eliminated_on_day": a.eliminated_on_day,
             }
-            for log in reversed(logs)
-        ]
-    return JSONResponse(rows)
+            for a in agents
+        ],
+    }
+
+
+def _logs_for_season(session, season_id, limit: int) -> list:
+    query = session.query(ChatLog)
+    if season_id is not None:
+        query = query.filter(ChatLog.season_id == season_id)
+    logs = query.order_by(ChatLog.timestamp.desc()).limit(limit).all()
+    return [
+        {
+            "timestamp":       log.timestamp.isoformat(),
+            "season_id":       log.season_id,
+            "day_number":      log.day_number,
+            "phase":           log.phase,
+            "agent_id":        log.agent_id,
+            "action_type":     log.action_type,
+            "target_agent_id": log.target_agent_id,
+            "message":         log.message,
+        }
+        for log in reversed(logs)
+    ]
 
 
 # ---------------------------------------------------------------------------

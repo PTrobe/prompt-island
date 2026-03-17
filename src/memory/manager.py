@@ -42,8 +42,13 @@ class MemoryManager:
     to an empty list if no store is provided, e.g. in tests).
     """
 
-    def __init__(self, chroma_store: ChromaMemoryStore | None = None) -> None:
-        self._chroma = chroma_store
+    def __init__(
+        self,
+        chroma_store: ChromaMemoryStore | None = None,
+        season_id:    int | None = None,
+    ) -> None:
+        self._chroma    = chroma_store
+        self._season_id = season_id
 
     # ------------------------------------------------------------------
     # Tier 1: Working Memory
@@ -83,18 +88,20 @@ class MemoryManager:
             List of {"role": "user"|"assistant", "content": "..."} dicts.
         """
         with get_session() as session:
+            query = session.query(ChatLog).filter(
+                ChatLog.day_number == day_number,
+                # Include public speech, system events, votes, and this agent's DMs.
+                # Exclude speak_private between other agents.
+                (
+                    ChatLog.action_type.in_(["speak_public", "system_event", "vote"])
+                    | (ChatLog.agent_id == agent_id)
+                    | (ChatLog.target_agent_id == agent_id)
+                ),
+            )
+            if self._season_id is not None:
+                query = query.filter(ChatLog.season_id == self._season_id)
             logs = (
-                session.query(ChatLog)
-                .filter(
-                    ChatLog.day_number == day_number,
-                    # Include public speech, system events, votes, and this agent's DMs.
-                    # Exclude speak_private between other agents.
-                    (
-                        ChatLog.action_type.in_(["speak_public", "system_event", "vote"])
-                        | (ChatLog.agent_id == agent_id)
-                        | (ChatLog.target_agent_id == agent_id)
-                    ),
-                )
+                query
                 .order_by(ChatLog.timestamp.asc())
                 .limit(limit)
                 .all()

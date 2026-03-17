@@ -51,32 +51,42 @@ class ChromaMemoryStore:
         memories = store.retrieve_memories("agent_01_machiavelli", "Alex betrayal vote", top_k=5)
     """
 
-    def __init__(self, persist_dir: str | Path = CHROMA_PERSIST_DIR) -> None:
+    def __init__(
+        self,
+        persist_dir: str | Path = CHROMA_PERSIST_DIR,
+        season_id:   int | None = None,
+    ) -> None:
         persist_path = str(Path(persist_dir).resolve())
+
+        # Each season gets its own ChromaDB collection so memories are fully
+        # isolated — no cross-season leakage, no extra metadata filters needed.
+        collection_name = (
+            f"episodic_memories_s{season_id}" if season_id is not None
+            else COLLECTION_NAME
+        )
 
         # Persistent client — survives process restarts; the DB is stored on disk
         self._client = chromadb.PersistentClient(path=persist_path)
 
         # OpenAI embedding function — same model specified in DATABASE_SCHEMA.md.
-        # ChromaDB 1.x looks for CHROMA_OPENAI_API_KEY; we also accept the
-        # standard OPENAI_API_KEY and pass it explicitly so both work.
+        # ChromaDB 1.x looks for CHROMA_OPENAI_API_KEY; also accept OPENAI_API_KEY.
         api_key = os.getenv("OPENAI_API_KEY") or os.getenv("CHROMA_OPENAI_API_KEY")
         embed_fn = OpenAIEmbeddingFunction(
             api_key=api_key,
             model_name=EMBEDDING_MODEL,
         )
 
-        # Get or create the single collection for all agents.
+        # Get or create the per-season collection.
         # hnsw:space=cosine gives semantic similarity (vs L2 distance).
         self._collection = self._client.get_or_create_collection(
-            name=COLLECTION_NAME,
+            name=collection_name,
             embedding_function=embed_fn,
             metadata={"hnsw:space": "cosine"},
         )
 
         logger.info(
             f"ChromaDB ready at '{persist_path}' "
-            f"(collection='{COLLECTION_NAME}', "
+            f"(collection='{collection_name}', "
             f"stored memories={self._collection.count()})"
         )
 
