@@ -161,6 +161,10 @@ def _call_anthropic(
 
     # Anthropic requires at least one human message
     if not human_messages:
+        logger.warning(
+            "Anthropic call had no human messages (empty chat history). "
+            "Injecting generic prompt — agent will have no working memory context."
+        )
         human_messages = [{"role": "user", "content": "What is your next action?"}]
 
     tool_def = {

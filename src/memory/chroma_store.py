@@ -150,14 +150,16 @@ class ChromaMemoryStore:
 
         Returns an empty list if the store is empty or retrieval fails.
         """
-        total = self._collection.count()
-        if total == 0:
+        # Use the per-agent count so n_results never exceeds the number of
+        # matching documents (ChromaDB raises if n_results > matching docs).
+        agent_count = self.count_for_agent(agent_id)
+        if agent_count == 0:
             return []
 
         try:
             results = self._collection.query(
                 query_texts=[context_query],
-                n_results=min(top_k, total),
+                n_results=min(top_k, agent_count),
                 where={"agent_id": agent_id},
             )
 

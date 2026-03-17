@@ -24,10 +24,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.api.server import app, connection_manager
-from src.broadcast.broadcaster import EventBroadcaster
-from src.engine.game_loop import GameEngine
-from src.utils.logger import setup_logging
+from src.api.server import app, connection_manager  # noqa: E402
+from src.broadcast.broadcaster import EventBroadcaster  # noqa: E402
+from src.engine.game_loop import GameEngine  # noqa: E402
+from src.utils.logger import setup_logging  # noqa: E402
 
 
 def _start_api_server(port: int) -> None:

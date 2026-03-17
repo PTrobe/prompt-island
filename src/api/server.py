@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -29,8 +30,6 @@ from src.db.database import get_session
 from src.db.models import Agent, ChatLog, GameState
 
 logger = logging.getLogger(__name__)
-
-app = FastAPI(title="Prompt Island API", version="0.1.0")
 
 # ---------------------------------------------------------------------------
 # ConnectionManager — tracks active WebSocket clients + thread-safe broadcast
@@ -95,14 +94,18 @@ connection_manager = ConnectionManager()
 
 
 # ---------------------------------------------------------------------------
-# Startup hook — capture the running event loop
+# Lifespan — capture the running event loop on startup
 # ---------------------------------------------------------------------------
 
 
-@app.on_event("startup")
-async def _on_startup() -> None:
+@asynccontextmanager
+async def _lifespan(app: FastAPI):  # noqa: ARG001
     connection_manager.set_loop(asyncio.get_running_loop())
     logger.info("Prompt Island API started — WebSocket manager ready")
+    yield
+
+
+app = FastAPI(title="Prompt Island API", version="0.1.0", lifespan=_lifespan)
 
 
 # ---------------------------------------------------------------------------

@@ -559,6 +559,10 @@ class GameEngine:
             try:
                 # Single structured output call: get summary + memory category together.
                 # Using NightSummaryResult avoids a second LLM call just for classification.
+                # Intentionally always uses OpenAI gpt-4o-mini here (not the agent's own
+                # provider): gpt-4o-mini is cheap, reliable for summarisation, and
+                # Structured Outputs guarantee schema compliance without provider-specific
+                # adaptation logic in the night phase.
                 summary_resp = _get_openai_client().beta.chat.completions.parse(
                     model="gpt-4o-mini",
                     messages=[{
@@ -771,7 +775,7 @@ class GameEngine:
             return (
                 session.query(Agent)
                 .filter(
-                    Agent.is_eliminated == False,
+                    Agent.is_eliminated.is_(False),
                     Agent.agent_id != "game_master",
                 )
                 .order_by(Agent.agent_id)
