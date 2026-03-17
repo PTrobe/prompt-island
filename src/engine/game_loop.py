@@ -28,6 +28,16 @@ from datetime import datetime
 from openai import OpenAI
 
 from src.agents.controller import get_agent_action
+
+# Lazy singleton — same pattern as controller.py; defers instantiation until first use.
+_openai_client: OpenAI | None = None
+
+
+def _get_openai_client() -> OpenAI:
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI()
+    return _openai_client
 from src.agents.registry import AgentConfig, AgentRegistry
 from src.agents.schemas import AgentAction
 from src.broadcast.broadcaster import EventBroadcaster
@@ -111,6 +121,15 @@ class GameEngine:
           - Initialize database connections.
           - Announce the start of the game in the Public Chat.
         """
+        # Idempotency guard — safe to call on a resumed game without re-seeding.
+        with get_session() as session:
+            if session.query(Agent).first():
+                logger.warning(
+                    "initialize_game() called on a non-empty database — skipping seed. "
+                    "Drop the DB file and restart to begin a fresh game."
+                )
+                return
+
         with get_session() as session:
             # GameState row (only one active row at a time)
             gs = GameState(current_day=1, current_phase="morning_chat", is_active=True)
@@ -190,7 +209,7 @@ class GameEngine:
             The agent_id of the winner (granted immunity), or None if skipped.
         """
         if not challenge_prompt:
-            logger.info("\n--- Day _ | Phase 2: Challenge — SKIPPED ---")
+            logger.info(f"\n--- Day {self._current_day()} | Phase 2: Challenge — SKIPPED ---")
             return None
 
         day   = self._current_day()
@@ -243,13 +262,12 @@ class GameEngine:
         Use GPT-4o-mini to evaluate challenge responses and pick the best one.
         Falls back to a random choice if the judge call fails.
         """
-        client = OpenAI()
         response_lines = "\n".join(
             f'- {agent_id}: "{action.message}"'
             for agent_id, action in responses.items()
         )
         try:
-            result = client.chat.completions.create(
+            result = _get_openai_client().chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{
                     "role": "user",
@@ -488,7 +506,7 @@ class GameEngine:
 
         logger.info(f"\n--- Day {day} | Phase 5: Night Consolidation ---")
 
-        # Pull complete day transcript from ChatLog
+        # Pull complete day transcript from ChatLog once; filter per-agent below
         with get_session() as session:
             all_logs = (
                 session.query(ChatLog)
@@ -496,20 +514,36 @@ class GameEngine:
                 .order_by(ChatLog.timestamp.asc())
                 .all()
             )
-            transcript_lines = [
-                f"[{log.phase}] {log.agent_id}: {log.message}"
+            # Detach-safe: capture needed fields before session closes
+            log_snapshots = [
+                {
+                    "phase":           log.phase,
+                    "agent_id":        log.agent_id,
+                    "target_agent_id": log.target_agent_id,
+                    "action_type":     log.action_type,
+                    "message":         log.message,
+                }
                 for log in all_logs
-                if log.action_type != "system_event"
             ]
-        transcript = "\n".join(transcript_lines) or "(No dialogue recorded today.)"
-
-        client = OpenAI()
 
         # Summarize from each surviving agent's first-person perspective
         for agent in self._active_agents():
             config = self.registry.get(agent.agent_id)
+
+            # Build an agent-specific transcript that respects DM secrecy:
+            #   - speak_public, vote, system_event → always visible
+            #   - speak_private → only visible if this agent was sender or receiver
+            agent_lines = [
+                f"[{s['phase']}] {s['agent_id']}: {s['message']}"
+                for s in log_snapshots
+                if s["action_type"] in ("speak_public", "vote", "system_event")
+                or s["agent_id"] == agent.agent_id
+                or s["target_agent_id"] == agent.agent_id
+            ]
+            transcript = "\n".join(agent_lines) or "(No dialogue recorded today.)"
+
             try:
-                summary_resp = client.chat.completions.create(
+                summary_resp = _get_openai_client().chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{
                         "role": "user",
@@ -544,7 +578,7 @@ class GameEngine:
 
         # Advance the game day
         with get_session() as session:
-            gs = session.query(GameState).filter(GameState.is_active == True).first()
+            gs = session.query(GameState).filter(GameState.is_active.is_(True)).first()
             gs.current_day  += 1
             gs.current_phase = "morning_chat"
 
@@ -731,7 +765,7 @@ class GameEngine:
         with get_session() as session:
             gs = (
                 session.query(GameState)
-                .filter(GameState.is_active == True)
+                .filter(GameState.is_active.is_(True))
                 .first()
             )
             return gs.current_day if gs else 1
@@ -745,7 +779,7 @@ class GameEngine:
         with get_session() as session:
             gs = (
                 session.query(GameState)
-                .filter(GameState.is_active == True)
+                .filter(GameState.is_active.is_(True))
                 .first()
             )
             if gs:

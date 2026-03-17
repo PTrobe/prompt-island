@@ -50,20 +50,27 @@ class MemoryManager:
         limit: int = WORKING_MEMORY_LIMIT,
     ) -> list[dict]:
         """
-        Return the last `limit` messages from the current phase as OpenAI-style
-        {"role": ..., "content": ...} dicts.
+        Return the last `limit` messages from the entire current day as
+        OpenAI-style {"role": ..., "content": ...} dicts.
 
-        Visibility rules (per game logic):
-          - speak_public messages:  always visible to everyone.
-          - system_event messages:  always visible (Game Master announcements).
-          - speak_private messages: visible only if agent_id is sender OR receiver.
-          - vote messages:          visible to everyone (votes are public at Tribal).
+        Fetches across ALL phases of the day (not just the current one) so agents
+        remember what happened in Morning Chat and the Scramble when it comes time
+        to vote at Tribal Council. Per MEMORY_AND_RAG.md §2: working memory is
+        cleared at the end of each *Day*, not each phase.
+
+        The `phase` parameter is accepted for API compatibility but is not used
+        to filter — that was the original bug (agents voted with no context from
+        earlier phases of the same day).
+
+        Visibility rules:
+          - speak_public, system_event, vote → always visible.
+          - speak_private → visible only if agent_id is sender OR receiver.
 
         Args:
             agent_id:    The agent whose perspective we're building context for.
             day_number:  The current game day (filters ChatLog rows).
-            phase:       The current phase string (filters ChatLog rows).
-            limit:       Maximum number of messages to return.
+            phase:       Accepted for compatibility; not used as a DB filter.
+            limit:       Maximum number of messages to return (most recent N).
 
         Returns:
             List of {"role": "user"|"assistant", "content": "..."} dicts.
@@ -73,8 +80,8 @@ class MemoryManager:
                 session.query(ChatLog)
                 .filter(
                     ChatLog.day_number == day_number,
-                    ChatLog.phase == phase,
-                    # Include public speech, system events, and this agent's DMs
+                    # Include public speech, system events, votes, and this agent's DMs.
+                    # Exclude speak_private between other agents.
                     (
                         ChatLog.action_type.in_(["speak_public", "system_event", "vote"])
                         | (ChatLog.agent_id == agent_id)

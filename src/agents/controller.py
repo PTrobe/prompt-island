@@ -34,6 +34,17 @@ from src.agents.schemas import AgentAction, FALLBACK_ACTION, VALID_ACTION_TYPES
 
 load_dotenv()
 
+# Lazy singleton — created on first use so import doesn't fail in environments
+# without OPENAI_API_KEY set (e.g. tests that don't hit the real API).
+_openai_client: Optional[OpenAI] = None
+
+
+def _get_openai_client() -> OpenAI:
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    return _openai_client
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -211,7 +222,6 @@ def get_agent_action(
     Returns:
         A fully validated AgentAction. NEVER raises; returns FALLBACK_ACTION on total failure.
     """
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     active_agent_ids = active_agent_ids or []
 
     # Build the complete system prompt once; reused (with possible correction appended)
@@ -249,7 +259,7 @@ def get_agent_action(
             # The parsed field gives us a fully-instantiated Pydantic object
             # without any manual json.loads() or model_validate() call.
             # -----------------------------------------------------------
-            response = client.beta.chat.completions.parse(
+            response = _get_openai_client().beta.chat.completions.parse(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_content},
