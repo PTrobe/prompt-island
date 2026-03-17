@@ -41,6 +41,7 @@ Thumbs.db
 frontend/.next/
 frontend/node_modules/
 frontend/.env.local
+!frontend/.env.local.example
 
 # Test artifacts
 .pytest_cache/
