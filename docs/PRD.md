@@ -22,7 +22,18 @@ To keep costs low while maintaining high quality, we will utilize open-source fr
 * **Audio/TTS:** `ElevenLabs API` (Unique voice profiles for each agent).
 * **Visuals/Frontend:** A web-based "hacker" UI built in React/Next.js that visualizes the JSON logs as a chat interface, captured via OBS Studio for broadcasting.
 
-## 4. Agent Communication Protocol (Crucial)
+## 4. Build Phases
+
+| Phase | Status | Description | Doc |
+|---|---|---|---|
+| Phase 1 | ✅ Done | Core game loop, SQLite, agents, personas, voting | — |
+| Phase 2 | ✅ Done | ChromaDB RAG memory, multi-provider LLM routing | `MEMORY_AND_RAG.md` |
+| Phase 3 | ✅ Done | FastAPI/WebSocket server, season management, persistence | `DATABASE_SCHEMA.md` |
+| Phase 4 | ✅ Done | Next.js streaming frontend, ElevenLabs TTS, audio queue | `FRONTEND_AND_STREAM.md` |
+| Phase 5 | 🔜 Next | Animated pixel art characters, lip-sync, character stage | `PHASE5_VISUAL_CHARACTERS.md` |
+| Phase 6 | 🔜 Planned | Twitch bot, channel point audience influence, chat relay | `PHASE6_TWITCH_INTEGRATION.md` |
+
+## 5. Agent Communication Protocol (Crucial)
 To process the game logic, agents MUST strictly reply in a structured JSON format. System prompts will enforce this.
 
 ```json
