@@ -21,29 +21,17 @@ from __future__ import annotations  # enables str | Path, list[str] on Python < 
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from openai import OpenAI
 from pydantic import ValidationError
 
+from src.agents.providers import call_llm
 from src.agents.schemas import AgentAction, FALLBACK_ACTION, VALID_ACTION_TYPES
 
 load_dotenv()
-
-# Lazy singleton — created on first use so import doesn't fail in environments
-# without OPENAI_API_KEY set (e.g. tests that don't hit the real API).
-_openai_client: Optional[OpenAI] = None
-
-
-def _get_openai_client() -> OpenAI:
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    return _openai_client
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +173,7 @@ def get_agent_action(
     persona_system_prompt: str,
     chat_history: list[dict],
     active_agent_ids: Optional[list[str]] = None,
+    provider: str = "openai",
     model: str = "gpt-4o",
     temperature: float = 0.7,
 ) -> AgentAction:
@@ -247,36 +236,24 @@ def get_agent_action(
 
         logger.info(
             f"[{agent_id}] LLM attempt {attempt}/{MAX_RETRIES} | "
-            f"model={model} | temp={call_temperature}"
+            f"provider={provider} model={model} | temp={call_temperature}"
         )
 
         try:
             # -----------------------------------------------------------
-            # LLM API call — OpenAI Structured Outputs
-            #
-            # client.beta.chat.completions.parse() uses JSON Schema mode
-            # to force the model to emit valid JSON matching AgentAction.
-            # The parsed field gives us a fully-instantiated Pydantic object
-            # without any manual json.loads() or model_validate() call.
+            # Multi-provider LLM dispatch
+            # Delegates to providers.py which handles OpenAI Structured
+            # Outputs, Anthropic tool_use, and Groq JSON mode uniformly.
             # -----------------------------------------------------------
-            response = _get_openai_client().beta.chat.completions.parse(
+            action: AgentAction = call_llm(
+                provider=provider,
                 model=model,
                 messages=[
                     {"role": "system", "content": system_content},
                     *chat_history,
                 ],
-                response_format=AgentAction,
                 temperature=call_temperature,
             )
-
-            action: Optional[AgentAction] = response.choices[0].message.parsed
-
-            # The API can return None if the model refuses or emits an empty response.
-            if action is None:
-                raise ValueError(
-                    "OpenAI Structured Outputs returned a null parsed object. "
-                    "The model may have refused or emitted an empty response."
-                )
 
             # -----------------------------------------------------------
             # Game-rule hallucination validation

@@ -8,9 +8,8 @@
 *.sqlite
 *.sqlite3
 
-# Broadcast output (runtime-generated)
-broadcast/events.jsonl
-broadcast/
+# Broadcast output (runtime-generated — top-level broadcast/ dir only)
+/broadcast/
 
 # Python
 __pycache__/

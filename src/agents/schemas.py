@@ -1,7 +1,7 @@
 """
-Pydantic data models for Prompt Island agent outputs.
+Pydantic data models for Prompt Island agent outputs and memory structures.
 
-Strictly follows CONSTRAINTS_AND_MODELS.md.
+Strictly follows CONSTRAINTS_AND_MODELS.md and DATABASE_SCHEMA.md §3.
 
 Every LLM response MUST deserialize into AgentAction. This model is passed
 directly to OpenAI's Structured Outputs API (response_format=AgentAction) so
@@ -14,7 +14,7 @@ Key design decisions:
     the controller injects when all retries are exhausted ("Brain Freeze").
 """
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -112,6 +112,55 @@ class AgentAction(BaseModel):
             ]
         }
     }
+
+
+# ---------------------------------------------------------------------------
+# EpisodicMemory — long-term vector DB schema (DATABASE_SCHEMA.md §3)
+# ---------------------------------------------------------------------------
+
+class EpisodicMemory(BaseModel):
+    """
+    Represents a summarized memory from a specific agent's perspective.
+    Stored in ChromaDB for semantic retrieval during RAG.
+
+    The `agent_id` filter is CRITICAL — agents must never retrieve each
+    other's memories (they cannot read minds).
+    """
+    memory_id:       str                    = Field(description="Unique identifier for this memory chunk.")
+    agent_id:        str                    = Field(description="The owner of this memory. Used as a ChromaDB where-filter.")
+    day_number:      int                    = Field(description="The game day this memory refers to.")
+    memory_category: Literal[
+        "alliance", "betrayal", "challenge_result", "general_observation"
+    ]                                       = Field(description="Primary category of this memory.")
+    content:         str                    = Field(description="The summarized first-person memory text.")
+    embedding:       Optional[List[float]]  = Field(default=None, description="Vector from text-embedding-3-small (set by ChromaDB).")
+
+
+# ---------------------------------------------------------------------------
+# NightSummaryResult — structured output for the nightly LLM summarization
+# ---------------------------------------------------------------------------
+
+class NightSummaryResult(BaseModel):
+    """
+    Structured output from the nightly consolidation LLM call.
+    Combines the first-person summary with a memory category classification
+    in a single structured output call, saving an extra LLM round-trip.
+    """
+    summary: str = Field(
+        description=(
+            "3–5 sentence first-person summary of the day's key events from this "
+            "agent's perspective. Focus on alliances, betrayals, and important conversations."
+        )
+    )
+    category: Literal[
+        "alliance", "betrayal", "challenge_result", "general_observation"
+    ] = Field(
+        description=(
+            "The primary memory category. Use 'alliance' if a new alliance formed or broke, "
+            "'betrayal' if someone lied or backstabbed, 'challenge_result' if a challenge "
+            "was the main event, otherwise 'general_observation'."
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

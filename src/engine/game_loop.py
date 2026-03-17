@@ -39,7 +39,8 @@ def _get_openai_client() -> OpenAI:
         _openai_client = OpenAI()
     return _openai_client
 from src.agents.registry import AgentConfig, AgentRegistry
-from src.agents.schemas import AgentAction
+from src.agents.schemas import AgentAction, NightSummaryResult
+from src.memory.chroma_store import ChromaMemoryStore
 from src.broadcast.broadcaster import EventBroadcaster
 from src.db.database import get_session, init_db
 from src.db.models import Agent, ChatLog, GameState, VoteHistory
@@ -68,16 +69,22 @@ Contestant responses:
 {responses}
 """
 
-# System prompt for the per-agent nightly summary
+# System prompt for the per-agent nightly summary (structured output → NightSummaryResult)
 _NIGHT_SUMMARY_PROMPT = """\
 You are {display_name} (ID: {agent_id}), a contestant on Prompt Island.
-Below is the complete transcript of Day {day}:
+Below is the complete transcript of Day {day} that you witnessed:
 
 {transcript}
 
-Summarize the key events of today in 3–5 sentences from YOUR personal perspective.
-Focus on alliances, betrayals, suspicious behaviour, and important conversations.
-Write entirely in first person as {display_name}.
+Respond with a JSON object containing:
+  "summary":  3–5 sentences summarising the day's key events from YOUR first-person perspective.
+              Focus on alliances, betrayals, suspicions, and important conversations.
+              Write as {display_name} — use "I", "me", "my".
+  "category": The single most relevant memory type for today:
+              "alliance"          — a new alliance formed or an existing one broke
+              "betrayal"          — someone lied to you, backstabbed you, or voted against you
+              "challenge_result"  — a challenge was the defining event of the day
+              "general_observation" — none of the above
 """
 
 
@@ -96,9 +103,16 @@ class GameEngine:
         registry:    AgentRegistry    | None = None,
         memory:      MemoryManager    | None = None,
         broadcaster: EventBroadcaster | None = None,
+        chroma_store: ChromaMemoryStore | None = None,
     ) -> None:
         self.registry    = registry    or AgentRegistry()
-        self.memory      = memory      or MemoryManager()
+        # Wire ChromaDB into memory — create a default store unless one is injected.
+        # Pass memory=MemoryManager() (no args) to disable long-term memory in tests.
+        if memory is not None:
+            self.memory = memory
+        else:
+            store = chroma_store or ChromaMemoryStore()
+            self.memory = MemoryManager(chroma_store=store)
         self.broadcaster = broadcaster or EventBroadcaster()
 
         # Set by run_challenge(); cleared after run_tribal_council()
@@ -543,7 +557,9 @@ class GameEngine:
             transcript = "\n".join(agent_lines) or "(No dialogue recorded today.)"
 
             try:
-                summary_resp = _get_openai_client().chat.completions.create(
+                # Single structured output call: get summary + memory category together.
+                # Using NightSummaryResult avoids a second LLM call just for classification.
+                summary_resp = _get_openai_client().beta.chat.completions.parse(
                     model="gpt-4o-mini",
                     messages=[{
                         "role": "user",
@@ -554,24 +570,25 @@ class GameEngine:
                             transcript=transcript,
                         ),
                     }],
+                    response_format=NightSummaryResult,
                     temperature=0.3,
-                    max_tokens=300,
                 )
-                summary_text = summary_resp.choices[0].message.content.strip()
-                logger.info(f"  [{agent.agent_id}] Summary: {summary_text[:120]}...")
+                result: NightSummaryResult | None = summary_resp.choices[0].message.parsed
+                if result is None:
+                    raise ValueError("Night summary returned null parsed response")
 
-                # ── Phase 3 TODO: embed + store in ChromaDB ──────────────────
-                # from src.memory.chroma_store import chroma_collection
-                # chroma_collection.add(
-                #     ids=[f"{agent.agent_id}_day{day}"],
-                #     documents=[summary_text],
-                #     metadatas=[{
-                #         "agent_id":        agent.agent_id,
-                #         "day_number":      day,
-                #         "memory_category": "general_observation",
-                #     }],
-                # )
-                # ─────────────────────────────────────────────────────────────
+                logger.info(
+                    f"  [{agent.agent_id}] Summary ({result.category}): "
+                    f"{result.summary[:100]}..."
+                )
+
+                # Persist to ChromaDB — enables RAG retrieval from Day 2 onwards
+                self.memory.store_memory(
+                    agent_id=agent.agent_id,
+                    day_number=day,
+                    content=result.summary,
+                    category=result.category,
+                )
 
             except Exception as exc:
                 logger.error(f"  Night summary failed for {agent.agent_id}: {exc}")
@@ -716,6 +733,7 @@ class GameEngine:
             persona_system_prompt=persona,
             chat_history=chat_history,
             active_agent_ids=active_ids,
+            provider=config.provider,
             model=config.model,
             temperature=config.temperature,
         )

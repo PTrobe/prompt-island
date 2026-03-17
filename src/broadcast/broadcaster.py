@@ -1,19 +1,23 @@
 """
-EventBroadcaster — writes game events to a JSONL file for real-time consumption.
+EventBroadcaster — writes game events to JSONL and pushes to WebSocket clients.
 
-Phase 2 implementation: simple append-only JSONL file writer.
+Each game event is:
+  1. Appended to broadcast/events.jsonl for persistence / log-tailing.
+  2. Pushed to all connected WebSocket clients via ConnectionManager
+     (thread-safe via asyncio.run_coroutine_threadsafe).
 
-Each line in the output file is a self-contained JSON object representing one
-game event (an agent action or a Game Master system announcement).  The file
-is designed to be tailed by a frontend or log aggregator.
-
-Phase 3 will replace this with:
-  - An async Redis/queue-based broadcaster
-  - ElevenLabs TTS integration for voice synthesis per agent
-  - WebSocket push to the frontend stream UI
-
-The interface is intentionally narrow so swapping the backend in Phase 3
-requires no changes to the GameEngine.
+Schema per event line:
+  {
+    "timestamp":       ISO 8601 UTC string,
+    "day_number":      int,
+    "phase":           str,
+    "agent_id":        str,
+    "display_name":    str,
+    "action_type":     str,
+    "target_agent_id": str | null,
+    "message":         str,
+    "inner_thought":   str | null
+  }
 """
 
 from __future__ import annotations
@@ -22,8 +26,12 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 from src.agents.schemas import AgentAction
+
+if TYPE_CHECKING:
+    from src.api.server import ConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -33,29 +41,23 @@ DEFAULT_OUTPUT_FILE = Path("broadcast/events.jsonl")
 
 class EventBroadcaster:
     """
-    Writes structured game events to a JSONL file.
+    Writes structured game events to a JSONL file and optionally pushes
+    them to connected WebSocket clients.
 
-    The output file is created (along with its parent directory) automatically
-    on first use.  A fresh file is NOT created on startup — events are appended
-    so a resumed game continues the same event log.
-
-    Schema per event line:
-      {
-        "timestamp":       ISO 8601 UTC string,
-        "day_number":      int,
-        "phase":           str,
-        "agent_id":        str,
-        "display_name":    str,
-        "action_type":     str,
-        "target_agent_id": str | null,
-        "message":         str,
-        "inner_thought":   str | null   ← hidden from other agents; stream overlay uses this
-      }
+    Args:
+        output_file:        Path to the JSONL event log.
+        connection_manager: Optional ConnectionManager from api/server.py.
+                            When provided, every event is also sent over WebSocket.
     """
 
-    def __init__(self, output_file: str | Path = DEFAULT_OUTPUT_FILE) -> None:
+    def __init__(
+        self,
+        output_file: str | Path = DEFAULT_OUTPUT_FILE,
+        connection_manager: Optional["ConnectionManager"] = None,
+    ) -> None:
         self.output_file = Path(output_file)
         self.output_file.parent.mkdir(parents=True, exist_ok=True)
+        self._ws = connection_manager
 
     # ------------------------------------------------------------------
     # Public methods
@@ -125,6 +127,8 @@ class EventBroadcaster:
     # ------------------------------------------------------------------
 
     def _write(self, event: dict) -> None:
-        """Append a single JSON event line to the output file."""
+        """Append event to JSONL file and push to WebSocket clients."""
         with self.output_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        if self._ws is not None:
+            self._ws.broadcast_from_thread(event)

@@ -4,13 +4,12 @@ MemoryManager — dual-tier memory system for Prompt Island agents.
 Implements MEMORY_AND_RAG.md §2:
 
   Tier 1 — Working Memory (short-term, context window):
-    Queries the ChatLog table for the recent conversation in the current phase.
-    Per DATABASE_SCHEMA.md §4: filtered by day_number and phase.
+    Queries the ChatLog table for the full current day's conversation.
     Cleared implicitly each day since queries are scoped to the current day.
 
-  Tier 2 — Episodic Memory (long-term, vector DB):
-    [PHASE 3 STUB] Returns an empty list until ChromaDB integration is built.
-    The injection format is already implemented so it slots in with zero changes.
+  Tier 2 — Episodic Memory (long-term, ChromaDB vector DB):
+    Nightly summaries embedded with text-embedding-3-small and stored in
+    ChromaDB. Retrieved via semantic search before every agent turn.
 
 The output of both tiers is injected into the LLM system prompt by the GameEngine
 before every agent turn (via _run_agent_turn → build_full_system_prompt).
@@ -19,9 +18,13 @@ before every agent turn (via _run_agent_turn → build_full_system_prompt).
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from src.db.database import get_session
 from src.db.models import ChatLog
+
+if TYPE_CHECKING:
+    from src.memory.chroma_store import ChromaMemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +38,12 @@ class MemoryManager:
     Provides memory context for agent turns.
 
     Tier 1 (working) is read from the SQLite ChatLog table.
-    Tier 2 (episodic) is a stub until Phase 3 (ChromaDB).
+    Tier 2 (episodic) is served by a ChromaMemoryStore (optional — falls back
+    to an empty list if no store is provided, e.g. in tests).
     """
+
+    def __init__(self, chroma_store: ChromaMemoryStore | None = None) -> None:
+        self._chroma = chroma_store
 
     # ------------------------------------------------------------------
     # Tier 1: Working Memory
@@ -105,25 +112,32 @@ class MemoryManager:
         top_k: int = 5,
     ) -> list[str]:
         """
-        [PHASE 3 STUB] Retrieve the Top-K most relevant episodic memories for an
-        agent from the vector database.
+        Retrieve the Top-K most relevant episodic memories for an agent from ChromaDB.
 
         Per MEMORY_AND_RAG.md §3:
-          1. Search ChromaDB for documents belonging to `agent_id`.
-          2. Rank by semantic similarity to `context_query`.
-          3. Return the `top_k` most relevant memory strings.
+          1. Query ChromaDB with a where-filter on agent_id (strict isolation).
+          2. Rank by cosine similarity to context_query.
+          3. Return the top_k most relevant memory strings, prefixed with day number.
 
-        Returns an empty list until ChromaDB is integrated in Phase 3.
+        Returns an empty list if no ChromaMemoryStore is attached (e.g. in tests).
         """
-        # TODO Phase 3: replace with ChromaDB query
-        # collection = chroma_client.get_collection("episodic_memories")
-        # results = collection.query(
-        #     query_texts=[context_query],
-        #     n_results=top_k,
-        #     where={"agent_id": agent_id},
-        # )
-        # return results["documents"][0] if results["documents"] else []
-        return []
+        if self._chroma is None:
+            return []
+        return self._chroma.retrieve_memories(agent_id, context_query, top_k)
+
+    def store_memory(
+        self,
+        agent_id:   str,
+        day_number: int,
+        content:    str,
+        category:   str = "general_observation",
+    ) -> None:
+        """
+        Persist an episodic memory to ChromaDB (called during Night Consolidation).
+        No-op if no ChromaMemoryStore is attached.
+        """
+        if self._chroma is not None:
+            self._chroma.store_memory(agent_id, day_number, content, category)
 
     def format_memories_for_prompt(self, memories: list[str]) -> str:
         """

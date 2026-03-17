@@ -17,6 +17,7 @@ For now, all agents fall back to OpenAI models.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,30 +37,47 @@ DISPLAY_NAMES: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Model normalisation
-# Maps the free-text LLM Engine field in each persona file to an OpenAI
-# model name.  The Literal fallback is gpt-4o.
-# Phase 3 will add Anthropic/Groq routing — the registry will return a
-# (provider, model) tuple instead of a plain model string.
+# Provider + model resolution
+#
+# Maps the free-text LLM Engine field to (provider, model) pairs.
+# If the required API key is absent, falls back to the OpenAI equivalent
+# so the game always runs even without every key configured.
 # ---------------------------------------------------------------------------
 
-_MODEL_MAP: dict[str, str] = {
-    "gpt-4o-mini": "gpt-4o-mini",   # Floater — fast, cheap
-    "gpt-4o":      "gpt-4o",        # Machiavelli, Pedant — high logic
-    # Anthropic Claude → fallback to gpt-4o until Phase 3
-    "claude":      "gpt-4o",
-    # Meta Llama (Groq) → fallback to gpt-4o-mini until Phase 3
-    "llama":       "gpt-4o-mini",
+# (keyword_in_engine_string → (provider, model, required_env_var))
+_ENGINE_MAP: list[tuple[str, str, str, str]] = [
+    # keyword      provider      model                              env var
+    ("gpt-4o-mini", "openai",    "gpt-4o-mini",                    "OPENAI_API_KEY"),
+    ("gpt-4o",      "openai",    "gpt-4o",                         "OPENAI_API_KEY"),
+    ("claude",      "anthropic", "claude-3-5-sonnet-20241022",      "ANTHROPIC_API_KEY"),
+    ("llama",       "groq",      "llama-3.1-70b-versatile",         "GROQ_API_KEY"),
+]
+
+# OpenAI fallbacks when a provider's API key is missing
+_FALLBACK: dict[str, tuple[str, str]] = {
+    "anthropic": ("openai", "gpt-4o"),
+    "groq":      ("openai", "gpt-4o-mini"),
 }
 
 
-def _resolve_model(raw_engine: str) -> str:
-    """Map a persona's free-text LLM Engine value to an OpenAI model name."""
+def _resolve_provider(raw_engine: str) -> tuple[str, str]:
+    """
+    Map a persona's LLM Engine string to a (provider, model) pair.
+
+    Falls back to the OpenAI equivalent if the required API key is not set,
+    so the game runs even when ANTHROPIC_API_KEY / GROQ_API_KEY are absent.
+    """
     engine_lower = raw_engine.lower()
-    for keyword, model in _MODEL_MAP.items():
+    for keyword, provider, model, env_var in _ENGINE_MAP:
         if keyword in engine_lower:
-            return model
-    return "gpt-4o"   # safe default
+            # Check if the API key is available; fall back if not
+            if os.getenv(env_var):
+                return provider, model
+            fallback = _FALLBACK.get(provider)
+            if fallback:
+                return fallback
+            return "openai", "gpt-4o"
+    return "openai", "gpt-4o"   # safe default
 
 
 # ---------------------------------------------------------------------------
@@ -69,11 +87,12 @@ def _resolve_model(raw_engine: str) -> str:
 @dataclass(frozen=True)
 class AgentConfig:
     """Immutable configuration record for a single agent persona."""
-    agent_id:         str
-    display_name:     str
-    model:            str
-    temperature:      float
-    system_prompt_raw: str   # May contain {display_name} tokens; resolved at call time
+    agent_id:          str
+    display_name:      str
+    provider:          str    # "openai" | "anthropic" | "groq"
+    model:             str    # Provider-specific model name
+    temperature:       float
+    system_prompt_raw: str    # May contain {display_name} tokens; resolved at call time
 
 
 # ---------------------------------------------------------------------------
@@ -169,10 +188,12 @@ class AgentRegistry:
         raw_temp   = float(temp_match.group(1))
         raw_prompt = prompt_match.group(1).strip()
 
+        provider, model = _resolve_provider(raw_engine)
         return AgentConfig(
             agent_id=raw_id,
             display_name=DISPLAY_NAMES.get(raw_id, raw_id),
-            model=_resolve_model(raw_engine),
+            provider=provider,
+            model=model,
             temperature=raw_temp,
             system_prompt_raw=raw_prompt,
         )

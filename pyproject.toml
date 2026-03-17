@@ -16,6 +16,12 @@ dependencies = [
     # LLM providers
     "openai>=1.50",
     "anthropic>=0.40",
+    "groq>=0.9",
+    # Vector database for episodic memory
+    "chromadb>=0.5",
+    # WebSocket API server
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
     # Environment configuration
     "python-dotenv>=1.0",
 ]
