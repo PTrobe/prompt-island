@@ -57,9 +57,12 @@ class ChromaMemoryStore:
         # Persistent client — survives process restarts; the DB is stored on disk
         self._client = chromadb.PersistentClient(path=persist_path)
 
-        # OpenAI embedding function — same model specified in DATABASE_SCHEMA.md
+        # OpenAI embedding function — same model specified in DATABASE_SCHEMA.md.
+        # ChromaDB 1.x looks for CHROMA_OPENAI_API_KEY; we also accept the
+        # standard OPENAI_API_KEY and pass it explicitly so both work.
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("CHROMA_OPENAI_API_KEY")
         embed_fn = OpenAIEmbeddingFunction(
-            api_key=os.getenv("OPENAI_API_KEY", ""),
+            api_key=api_key,
             model_name=EMBEDDING_MODEL,
         )
 
