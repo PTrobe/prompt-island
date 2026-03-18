@@ -46,11 +46,11 @@ except ImportError:
 # Config
 # ---------------------------------------------------------------------------
 
-SPRITE_W    = 16
-SPRITE_H    = 24
+SPRITE_W    = 32
+SPRITE_H    = 48
 SHEET_COLS  = 4
 SHEET_ROWS  = 5
-PALETTE_COLORS = 8
+PALETTE_COLORS = 16
 
 REF_DIR    = Path("assets/references")
 OUTPUT_DIR = Path("frontend/public/sprites")
@@ -178,13 +178,13 @@ def _shift_rows(base: Image.Image, row_start: int, row_end: int,
 
 def make_idle_frames(base: Image.Image) -> list[Image.Image]:
     """
-    4 idle frames — very subtle 1-pixel breathing shift on the upper body.
-    At 16×24px this creates a gentle alive-looking animation.
+    4 idle frames — subtle 2-pixel breathing shift on the upper body.
+    At 32×48px this creates a gentle alive-looking animation.
     """
     f0 = base.copy()
-    f1 = _shift_rows(base, 0, 10, dy=1)   # upper body shifts up 1px (inhale)
+    f1 = _shift_rows(base, 0, 20, dy=2)   # upper body shifts up 2px (inhale)
     f2 = base.copy()                        # back to neutral
-    f3 = _shift_rows(base, 0, 10, dy=-1)  # upper body shifts down 1px (exhale)
+    f3 = _shift_rows(base, 0, 20, dy=-2)  # upper body shifts down 2px (exhale)
     return [f0, f1, f2, f3]
 
 
@@ -194,8 +194,8 @@ def make_walk_frames(base: Image.Image) -> list[Image.Image]:
     Simple but reads correctly as walking from top-down.
     """
     frames = []
-    leg_top  = 14
-    leg_offsets = [(0, -1), (0, 1), (0, 0), (0, 0)]  # (left_dy, right_dy) per frame
+    leg_top  = 28
+    leg_offsets = [(0, -2), (0, 2), (0, 0), (0, 0)]  # (left_dy, right_dy) per frame
 
     for l_dy, r_dy in leg_offsets:
         frame = base.copy()
@@ -231,8 +231,8 @@ def make_talk_frames(base: Image.Image) -> list[Image.Image]:
     Mouth rows are approximate for a top-down character at 16×24px.
     """
     frames = []
-    mouth_row   = 5
-    mouth_cols  = range(6, 10)   # cols 6-9
+    mouth_row   = 10
+    mouth_cols  = range(12, 20)   # cols 12-19
     mouth_dark  = (30, 15, 10, 255)   # dark mouth interior
     mouth_bg    = _sample_dominant_colour(base, mouth_cols, [mouth_row])
 
@@ -280,16 +280,16 @@ def make_react_frames(base: Image.Image) -> list[Image.Image]:
     # REACT_WORRIED: darken top half slightly
     worried = _darken_region(base, 0, 8, factor=0.8)
 
-    # REACT_SHOCKED: add 2 bright pixels at eye level (wide eyes)
+    # REACT_SHOCKED: add bright pixels at eye level (wide eyes)
     shocked = base.copy()
     d = ImageDraw.Draw(shocked)
-    d.point((5, 3),  fill=(255, 255, 255, 255))
-    d.point((10, 3), fill=(255, 255, 255, 255))
+    d.rectangle((8, 5, 11, 8),   fill=(255, 255, 255, 255))
+    d.rectangle((20, 5, 23, 8),  fill=(255, 255, 255, 255))
 
-    # REACT_SUSPICIOUS: shift one eye area 1px (squint effect)
+    # REACT_SUSPICIOUS: darken one eye area (squint effect)
     suspicious = base.copy()
     d2 = ImageDraw.Draw(suspicious)
-    d2.point((10, 3), fill=(20, 20, 20, 255))
+    d2.rectangle((20, 5, 23, 8), fill=(20, 20, 20, 255))
 
     return [happy, worried, shocked, suspicious]
 
@@ -311,8 +311,8 @@ def make_eliminated_frame(base: Image.Image) -> Image.Image:
             if base_px[x, y][3] < 128:
                 res_px[x, y] = (0, 0, 0, 0)
 
-    # Slump: shift lower body down 1px
-    result = _shift_rows(result, 12, SPRITE_H - 1, dy=-1)
+    # Slump: shift lower body down 2px
+    result = _shift_rows(result, 24, SPRITE_H - 1, dy=-2)
     return result
 
 # ---------------------------------------------------------------------------

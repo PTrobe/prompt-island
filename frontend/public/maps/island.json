@@ -2435,14 +2435,23 @@
   "orientation": "orthogonal",
   "renderorder": "right-down",
   "tiledversion": "1.10.0",
-  "tileheight": 16,
+  "tileheight": 32,
   "tilesets": [
     {
+      "columns": 6,
       "firstgid": 1,
-      "source": "island_tileset.tsj"
+      "image": "../tiles/island_tileset.png",
+      "imageheight": 96,
+      "imagewidth": 192,
+      "margin": 0,
+      "name": "island_tileset",
+      "spacing": 0,
+      "tilecount": 18,
+      "tileheight": 32,
+      "tilewidth": 32
     }
   ],
-  "tilewidth": 16,
+  "tilewidth": 32,
   "type": "map",
   "version": "1.10",
   "width": 40,
@@ -2450,62 +2459,62 @@
     {
       "name": "location_camp_x",
       "type": "int",
-      "value": 224
+      "value": 448
     },
     {
       "name": "location_camp_y",
       "type": "int",
-      "value": 240
+      "value": 480
     },
     {
       "name": "location_beach_x",
       "type": "int",
-      "value": 320
+      "value": 640
     },
     {
       "name": "location_beach_y",
       "type": "int",
-      "value": 80
+      "value": 160
     },
     {
       "name": "location_jungle_x",
       "type": "int",
-      "value": 128
+      "value": 256
     },
     {
       "name": "location_jungle_y",
       "type": "int",
-      "value": 192
+      "value": 384
     },
     {
       "name": "location_tribal_fire_x",
       "type": "int",
-      "value": 320
+      "value": 640
     },
     {
       "name": "location_tribal_fire_y",
       "type": "int",
-      "value": 368
+      "value": 736
     },
     {
       "name": "location_confessional_hut_x",
       "type": "int",
-      "value": 512
+      "value": 1024
     },
     {
       "name": "location_confessional_hut_y",
       "type": "int",
-      "value": 192
+      "value": 384
     },
     {
       "name": "location_shelter_x",
       "type": "int",
-      "value": 208
+      "value": 416
     },
     {
       "name": "location_shelter_y",
       "type": "int",
-      "value": 320
+      "value": 640
     }
   ]
 }

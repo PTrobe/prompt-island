@@ -55,8 +55,8 @@ AGENT_IDS = [
     "agent_06_floater",
 ]
 
-SPRITE_SHEET_SIZE = (64, 120)   # 4 cols × 16px = 64, 5 rows × 24px = 120
-TILESET_SIZE      = (96, 48)    # 6 cols × 16px = 96, 3 rows × 16px = 48
+SPRITE_SHEET_SIZE = (128, 240)  # 4 cols × 32px = 128, 5 rows × 48px = 240
+TILESET_SIZE      = (192, 96)   # 6 cols × 32px = 192, 3 rows × 32px = 96
 
 TILE_NAMES = [
     "deep_water", "water_edge", "sand", "grass", "dirt_path", "grass_dark",
@@ -123,10 +123,10 @@ def check_map_json(path: Path) -> tuple[bool, str]:
         errors.append(f"expected width=40, got {data.get('width')}")
     if data.get("height") != 30:
         errors.append(f"expected height=30, got {data.get('height')}")
-    if data.get("tilewidth") != 16:
-        errors.append(f"expected tilewidth=16, got {data.get('tilewidth')}")
-    if data.get("tileheight") != 16:
-        errors.append(f"expected tileheight=16, got {data.get('tileheight')}")
+    if data.get("tilewidth") != 32:
+        errors.append(f"expected tilewidth=32, got {data.get('tilewidth')}")
+    if data.get("tileheight") != 32:
+        errors.append(f"expected tileheight=32, got {data.get('tileheight')}")
     layers = data.get("layers", [])
     if len(layers) < 2:
         errors.append(f"expected 2 layers, got {len(layers)}")
@@ -165,7 +165,7 @@ def main() -> None:
     # ── 1. Sprite sheets (CRITICAL) ──────────────────────────────────────────
     print("\n── Sprite Sheets ──────────────────────────────────────────────────")
     print(f"   Expected: {SPRITE_SHEET_SIZE[0]}×{SPRITE_SHEET_SIZE[1]}px, RGBA, "
-          f"4 cols × 5 rows of 16×24px frames\n")
+          f"4 cols × 5 rows of 32×48px frames\n")
     for agent_id in AGENT_IDS:
         path = SPRITE_DIR / f"{agent_id}_sheet.png"
         ok, msg = check_image(path, SPRITE_SHEET_SIZE)
@@ -176,7 +176,7 @@ def main() -> None:
     # ── 2. Tileset (CRITICAL) ────────────────────────────────────────────────
     print("\n── Tileset ─────────────────────────────────────────────────────────")
     print(f"   Expected: {TILESET_SIZE[0]}×{TILESET_SIZE[1]}px, RGBA, "
-          f"6 cols × 3 rows of 16×16px tiles\n")
+          f"6 cols × 3 rows of 32×32px tiles\n")
     ok, msg = check_image(TILESET_PATH, TILESET_SIZE)
     print(f"   {msg}")
     if not ok:

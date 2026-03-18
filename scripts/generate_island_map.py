@@ -41,8 +41,8 @@ from pathlib import Path
 
 MAP_W    = 40
 MAP_H    = 30
-TILE_W   = 16
-TILE_H   = 16
+TILE_W   = 32
+TILE_H   = 32
 
 # ---------------------------------------------------------------------------
 # Tile indices (0-based, +1 in Tiled JSON data)
@@ -273,8 +273,17 @@ def build_tiled_json(terrain: list[list[int]], objects: list[list[int]]) -> dict
         "tileheight": TILE_H,
         "tilesets": [
             {
-                "firstgid": 1,
-                "source": "island_tileset.tsj",  # Phaser loads this as the tileset key
+                "columns":     6,
+                "firstgid":    1,
+                "image":       "../tiles/island_tileset.png",
+                "imageheight": 96,
+                "imagewidth":  192,
+                "margin":      0,
+                "name":        "island_tileset",
+                "spacing":     0,
+                "tilecount":   18,
+                "tileheight":  32,
+                "tilewidth":   32,
             }
         ],
         "tilewidth": TILE_W,
@@ -283,18 +292,18 @@ def build_tiled_json(terrain: list[list[int]], objects: list[list[int]]) -> dict
         "width": MAP_W,
         # Custom properties — location coordinates for IslandMap.ts reference
         "properties": [
-            {"name": "location_camp_x",             "type": "int", "value": 224},
-            {"name": "location_camp_y",             "type": "int", "value": 240},
-            {"name": "location_beach_x",            "type": "int", "value": 320},
-            {"name": "location_beach_y",            "type": "int", "value": 80},
-            {"name": "location_jungle_x",           "type": "int", "value": 128},
-            {"name": "location_jungle_y",           "type": "int", "value": 192},
-            {"name": "location_tribal_fire_x",      "type": "int", "value": 320},
-            {"name": "location_tribal_fire_y",      "type": "int", "value": 368},
-            {"name": "location_confessional_hut_x", "type": "int", "value": 512},
-            {"name": "location_confessional_hut_y", "type": "int", "value": 192},
-            {"name": "location_shelter_x",          "type": "int", "value": 208},
-            {"name": "location_shelter_y",          "type": "int", "value": 320},
+            {"name": "location_camp_x",             "type": "int", "value": 448},
+            {"name": "location_camp_y",             "type": "int", "value": 480},
+            {"name": "location_beach_x",            "type": "int", "value": 640},
+            {"name": "location_beach_y",            "type": "int", "value": 160},
+            {"name": "location_jungle_x",           "type": "int", "value": 256},
+            {"name": "location_jungle_y",           "type": "int", "value": 384},
+            {"name": "location_tribal_fire_x",      "type": "int", "value": 640},
+            {"name": "location_tribal_fire_y",      "type": "int", "value": 736},
+            {"name": "location_confessional_hut_x", "type": "int", "value": 1024},
+            {"name": "location_confessional_hut_y", "type": "int", "value": 384},
+            {"name": "location_shelter_x",          "type": "int", "value": 416},
+            {"name": "location_shelter_y",          "type": "int", "value": 640},
         ],
     }
 
