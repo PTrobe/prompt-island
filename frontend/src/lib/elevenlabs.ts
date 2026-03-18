@@ -64,8 +64,14 @@ export async function synthesizeSpeech(
 /**
  * Decode and play an audio ArrayBuffer via the Web Audio API.
  * Resolves when playback completes (or immediately on decode error).
+ *
+ * onSource(ctx, source) — called just before playback starts so callers can
+ * attach an AnalyserNode for lip-sync.
  */
-export function playAudioBuffer(buffer: ArrayBuffer): Promise<void> {
+export function playAudioBuffer(
+  buffer: ArrayBuffer,
+  onSource?: (ctx: AudioContext, source: AudioBufferSourceNode) => void,
+): Promise<void> {
   return new Promise((resolve) => {
     try {
       const audioCtx = new AudioContext();
@@ -75,13 +81,14 @@ export function playAudioBuffer(buffer: ArrayBuffer): Promise<void> {
           const source = audioCtx.createBufferSource();
           source.buffer = decoded;
           source.connect(audioCtx.destination);
+          if (onSource) onSource(audioCtx, source);
           source.onended = () => resolve();
           source.start(0);
         },
-        () => resolve(), // decode error — resolve silently
+        () => resolve(),
       );
     } catch {
-      resolve(); // AudioContext not available
+      resolve();
     }
   });
 }

@@ -8,17 +8,14 @@
  *   │                                │  CHAT LOG (right)      │
  *   │        PHASER ISLAND           │  ~300px                │
  *   │         (fills left)           │                        │
- *   │                                │                        │
  *   └────────────────────────────────┴────────────────────────┘
  *
- * Confessional still renders as an overlay within the Phaser canvas area
- * when an inner_thought arrives.
- *
- * Event flow:
- *   WebSocket → onEvent() → audioQueue.enqueue()
- *     → onDisplay()      → setDisplayedEvents() [chat log]
- *     → onConfessional() → setConfessional()    [confessional overlay]
- *   WebSocket → island events → islandScene methods
+ * Event routing:
+ *   phase_change   → moveAllTo + focusCamera + night mode toggle
+ *   speak_public   → agentSpeak + focusOnAgent + lip-sync
+ *   speak_private  → confessionalSequence (when inner_thought present)
+ *   vote           → agentReact
+ *   elimination    → eliminateAgent + focusCamera
  */
 
 'use client';
@@ -32,50 +29,82 @@ import StatusBar from '@/components/StatusBar';
 import HubChat from '@/components/HubChat';
 import Confessional from '@/components/Confessional';
 import type { IslandScene } from '@/game/scenes/IslandScene';
-import type { LocationId } from '@/game/map/IslandMap';
 import { phaseToLocation } from '@/game/map/IslandMap';
+import type { LocationId } from '@/game/map/IslandMap';
 
-// Phaser must not run on the server — SSR=false is required
 const PhaserGame = dynamic(() => import('@/game/PhaserGame'), { ssr: false });
 
 export default function Page() {
   const [displayedEvents, setDisplayedEvents] = useState<GameEvent[]>([]);
   const [confessional, setConfessional] = useState<ConfessionalState>({
-    thought: null,
-    agentId: '',
-    displayName: '',
+    thought: null, agentId: '', displayName: '',
   });
-  const sceneRef = useRef<IslandScene | null>(null);
+  const sceneRef    = useRef<IslandScene | null>(null);
+  const lastPhaseRef = useRef<string>('');
 
   const handleSceneReady = useCallback((scene: IslandScene) => {
     sceneRef.current = scene;
+
+    // Wire lip-sync: when ElevenLabs plays audio, pipe it through the scene
+    audioQueue.setLipSyncCallback((agentId, ctx, source) => {
+      scene.startLipSync(agentId, ctx, source);
+    });
   }, []);
 
-  // Called by the audio queue when it's time to show an event
   const handleDisplay = useCallback((event: GameEvent) => {
     setDisplayedEvents((prev) => [...prev.slice(-150), event]);
 
-    // Drive island visuals from game events
     const scene = sceneRef.current;
     if (!scene) return;
 
-    if (event.action_type === 'speak_public' && event.agent_id) {
-      scene.agentSpeak(event.agent_id, event.message);
-    }
-    if (event.action_type === 'vote' && event.agent_id) {
-      scene.agentReact(event.agent_id);
-    }
-    if (event.action_type === 'elimination' && event.agent_id) {
-      scene.eliminateAgent(event.agent_id);
-    }
-    if (event.action_type === 'phase_change' && event.phase) {
+    // Reset WAITING timer on every event
+    scene.notifyEvent();
+
+    // ── Phase change detection ──────────────────────────────────────────────
+    // Every event carries a phase field — detect transitions from any event type
+    if (event.phase && event.phase !== lastPhaseRef.current) {
+      lastPhaseRef.current = event.phase;
       const locId = phaseToLocation(event.phase) as LocationId;
       scene.moveAllTo(locId);
       scene.focusCamera(locId);
+      scene.setNightMode(event.phase === 'night_consolidation');
+    }
+
+    // ── Action-specific routing ─────────────────────────────────────────────
+    switch (event.action_type) {
+      case 'speak_public':
+        if (event.agent_id && event.message) {
+          scene.agentSpeak(event.agent_id, event.message);
+        }
+        break;
+
+      case 'speak_private':
+        // Inner thoughts go to confessional zoom sequence on the island
+        if (event.inner_thought && event.agent_id) {
+          scene.confessionalSequence(event.agent_id, event.inner_thought);
+        }
+        break;
+
+      case 'vote':
+        if (event.agent_id) scene.agentReact(event.agent_id);
+        if (event.target_agent_id) {
+          // Target also reacts (worried)
+          scene.time?.delayedCall(800, () => scene.agentReact(event.target_agent_id!));
+        }
+        break;
+
+      case 'elimination':
+        if (event.agent_id) {
+          scene.eliminateAgent(event.agent_id);
+        }
+        break;
+
+      case 'phase_change':
+        // Already handled above via phase field detection — no extra action needed
+        break;
     }
   }, []);
 
-  // Called by the audio queue to update the Confessional overlay
   const handleConfessional = useCallback(
     (thought: string | null, agentId: string, displayName: string) => {
       setConfessional({ thought, agentId, displayName });
@@ -83,7 +112,6 @@ export default function Page() {
     [],
   );
 
-  // Called immediately when a WebSocket event arrives
   const handleEvent = useCallback(
     (event: GameEvent) => {
       audioQueue.enqueue(event, handleDisplay, handleConfessional);
@@ -98,11 +126,10 @@ export default function Page() {
       <StatusBar gameState={gameState} connected={connected} />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: Phaser island — fills available space */}
+        {/* Left: Phaser island */}
         <div className="relative flex-1 bg-[#1a3a5c] overflow-hidden">
           <PhaserGame onSceneReady={handleSceneReady} />
 
-          {/* Confessional overlays the island when active */}
           {confessional.thought && (
             <div className="absolute inset-0 pointer-events-none">
               <Confessional state={confessional} />
@@ -110,7 +137,7 @@ export default function Page() {
           )}
         </div>
 
-        {/* Right: chat log panel */}
+        {/* Right: chat log */}
         <div className="w-[300px] border-l border-neutral-800 overflow-hidden flex flex-col">
           <HubChat events={displayedEvents} />
         </div>

@@ -96,6 +96,43 @@ class EventBroadcaster:
             f"{action.message[:70]}"
         )
 
+    def broadcast_phase_change(self, phase: str, day_number: int) -> None:
+        """
+        Broadcast a phase_change event so the frontend repositions agents.
+        Called by GameEngine._set_phase() at every phase transition.
+        """
+        event = {
+            "timestamp":       datetime.utcnow().isoformat(),
+            "day_number":      day_number,
+            "phase":           phase,
+            "agent_id":        "game_master",
+            "display_name":    "Game Master",
+            "action_type":     "phase_change",
+            "target_agent_id": None,
+            "message":         phase,
+            "inner_thought":   None,
+        }
+        self._write(event)
+        logger.info(f"[BROADCAST] Day {day_number} | PHASE CHANGE → {phase}")
+
+    def broadcast_elimination(
+        self, agent_id: str, display_name: str, day_number: int, phase: str
+    ) -> None:
+        """Broadcast an elimination event so the frontend plays the exit sequence."""
+        event = {
+            "timestamp":       datetime.utcnow().isoformat(),
+            "day_number":      day_number,
+            "phase":           phase,
+            "agent_id":        agent_id,
+            "display_name":    display_name,
+            "action_type":     "elimination",
+            "target_agent_id": None,
+            "message":         f"{display_name} has been eliminated.",
+            "inner_thought":   None,
+        }
+        self._write(event)
+        logger.info(f"[BROADCAST] Day {day_number} | ELIMINATION → {display_name} ({agent_id})")
+
     def broadcast_system_event(
         self,
         message: str,

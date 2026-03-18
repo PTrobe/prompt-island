@@ -19,6 +19,7 @@ import { synthesizeSpeech, playAudioBuffer } from './elevenlabs';
 
 type DisplayFn = (event: GameEvent) => void;
 type ConfessionalFn = (thought: string | null, agentId: string, displayName: string) => void;
+type LipSyncFn = (agentId: string, ctx: AudioContext, source: AudioBufferSourceNode) => void;
 
 interface QueueItem {
   event: GameEvent;
@@ -29,6 +30,12 @@ interface QueueItem {
 class AudioQueueManager {
   private readonly queue: QueueItem[] = [];
   private processing = false;
+  private _onLipSync: LipSyncFn | null = null;
+
+  /** Register a lip-sync callback (set once by PhaserGame on scene ready). */
+  setLipSyncCallback(fn: LipSyncFn): void {
+    this._onLipSync = fn;
+  }
 
   enqueue(event: GameEvent, onDisplay: DisplayFn, onConfessional: ConfessionalFn): void {
     this.queue.push({ event, onDisplay, onConfessional });
@@ -64,7 +71,12 @@ class AudioQueueManager {
     if (event.action_type === 'speak_public' && event.message.trim()) {
       const buffer = await synthesizeSpeech(event.agent_id, event.message);
       if (buffer) {
-        await playAudioBuffer(buffer);
+        const lipSync = this._onLipSync;
+        const agentId = event.agent_id;
+        await playAudioBuffer(buffer, lipSync
+          ? (ctx, src) => lipSync(agentId, ctx, src)
+          : undefined,
+        );
       } else {
         // No TTS — estimate reading time from message length (~15 chars/s, min 2 s)
         await sleep(Math.max(2000, event.message.length * 67));

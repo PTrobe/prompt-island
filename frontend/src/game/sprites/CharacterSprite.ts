@@ -113,6 +113,13 @@ export class CharacterSprite {
     this.sprite.play(`${this.agentId}_${state}`);
   }
 
+  /** Drive a specific mouth frame (0-3) directly — used by LipSyncAnalyser. */
+  setTalkFrame(col: 0 | 1 | 2 | 3): void {
+    this.sprite.anims.stop();
+    this.sprite.setFrame(8 + col); // row 2, col 0-3
+    this.currentAnim = 'talk';
+  }
+
   // ── Movement ──────────────────────────────────────────────────────────────
 
   moveTo(x: number, y: number, onComplete?: () => void): void {

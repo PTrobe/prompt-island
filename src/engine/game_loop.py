@@ -507,6 +507,7 @@ class GameEngine:
         )
         self._log_system_event(elim_message, phase)
         self.broadcaster.broadcast_system_event(elim_message, day, phase)
+        self.broadcaster.broadcast_elimination(eliminated, elim_config.display_name, day, phase)
         logger.info(f"  ELIMINATED: {eliminated} ({elim_config.display_name})")
 
         # Reset immunity for the next day
@@ -816,7 +817,7 @@ class GameEngine:
     # ------------------------------------------------------------------
 
     def _set_phase(self, phase: str) -> None:
-        """Update GameState.current_phase for this season."""
+        """Update GameState.current_phase and broadcast the transition."""
         with get_session() as session:
             query = session.query(GameState).filter(GameState.is_active.is_(True))
             if self.season_id is not None:
@@ -824,6 +825,7 @@ class GameEngine:
             gs = query.first()
             if gs:
                 gs.current_phase = phase
+        self.broadcaster.broadcast_phase_change(phase, self._current_day())
 
     def _log_action(
         self,
