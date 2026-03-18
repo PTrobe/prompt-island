@@ -59,10 +59,20 @@ Uses `twitchio` library (`pip install twitchio`).
 
 ```python
 # TwitchBot class
-# - __init__(channel, token, client_id)
-# - async def post(message: str) → sends message to Twitch chat
-# - async def start() → connects to IRC, keeps alive in background thread
+# - __init__(channel, access_token, client_id)
+# - async def post(message: str) → enqueues message to rate-limited send queue
+# - async def start() → connects to IRC, starts send queue worker, keeps alive in daemon thread
 # - async def stop() → graceful shutdown
+#
+# Rate limiting (CRITICAL):
+#   Non-verified Twitch bots are limited to 20 messages / 30 seconds.
+#   During a vote sequence the game can emit 6+ events in seconds — without a
+#   rate limiter the bot gets silently throttled or temporarily banned from chat.
+#
+#   Implementation: token bucket with capacity=18, refill=18 per 30s.
+#   Messages that exceed the bucket are dropped (logged as WARNING), never queued
+#   indefinitely — a growing queue would cause delayed messages that are confusing
+#   to viewers ("why is the bot announcing an event from 5 minutes ago?").
 ```
 
 **Messages the bot posts (triggered by GameEngine events):**
@@ -136,11 +146,57 @@ Uses Twitch EventSub via WebSocket (no ngrok needed — WebSocket transport work
 # - on_redemption(reward_title, user_name, user_input)   ← channel points
 # - on_cheer(bits_amount, user_name, message)            ← Bits
 #   Both map to a pending AudienceAction stored in a thread-safe queue.Queue
-# - get_pending_actions() → list[AudienceAction]
-#   Called by GameEngine at phase boundaries only (never mid-phase)
-# - Per-day cooldowns enforced here (e.g. max 1 revote per day)
-# - AudienceAction dataclass: { action_type, payload, source_user, bits_amount }
+#   Input is sanitised via sanitise_audience_input() before storage.
+#
+# - get_pending_actions(active_agent_ids: list[str]) → list[AudienceAction]
+#   Called by GameEngine at phase boundaries only (never mid-phase).
+#   Takes the current list of non-eliminated agent IDs as a parameter.
+#
+#   Handles eliminated targets:
+#     For any action with a target_agent_id that is NOT in active_agent_ids:
+#       - Redirect to a random active agent
+#       - Queue a bot message: "Agent X was eliminated — your question was
+#         redirected to Agent Y" (respects rate limiter)
+#       - Log the redirect at INFO level
+#
+# - Per-day cooldowns enforced here (e.g. max 1 revote per game day)
+# - AudienceAction dataclass: { action_type, payload, source_user, bits_amount, target_agent_id }
 ```
+
+### Audience input sanitisation (`audience_bridge.py`)
+
+`Ask an Agent` allows viewers to send arbitrary text into the AI's context. Without protection, adversarial viewers can attempt prompt injection on a live stream — making your AI say something embarrassing or offensive in front of an audience. This must be robust.
+
+```python
+# Sanitise user_input before storing as an AudienceAction.
+# Applied in on_redemption() and on_cheer() before any queue insertion.
+
+INJECTION_PATTERNS = [
+    "ignore previous", "ignore all", "you are now", "forget your",
+    "system:", "assistant:", "[game master]", "<", ">",
+    "new instruction", "disregard", "override",
+]
+
+def sanitise_audience_input(text: str) -> str | None:
+    """
+    Returns sanitised text, or None if the input should be rejected entirely.
+    Rejection triggers a point refund via Twitch API (channel points) or
+    a logged warning (Bits — non-refundable).
+    """
+    text = text.strip()[:100]                    # hard cap 100 chars
+    text = text.replace("\n", " ").replace("\r", " ")  # no newlines
+    lower = text.lower()
+    for pattern in INJECTION_PATTERNS:
+        if pattern in lower:
+            return None                          # reject
+    return text
+
+# Injection-safe framing when writing to ChatLog:
+# f'A viewer named "{source_user}" asks: "{sanitised_input}"'
+# The quote marks and attribution framing significantly reduce injection success.
+```
+
+**OpenAI moderation check (optional but recommended):** Pass `sanitised_input` through `openai.moderations.create()` before injecting. The moderation API is free, fast (~100ms), and catches hate speech and explicit content that the pattern blocklist misses.
 
 **GameEngine integration points:**
 
@@ -174,12 +230,37 @@ Show live Twitch chat messages in the frontend alongside game events. This is a 
 ## Environment Variables (add to `.env`)
 
 ```bash
-TWITCH_BOT_TOKEN=oauth:xxxxxxxxxxxxxxxxxxxxxxxx
+TWITCH_BOT_ACCESS_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx   # no "oauth:" prefix — twitchio adds it
+TWITCH_BOT_REFRESH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx  # stored alongside access token
 TWITCH_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxx
 TWITCH_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
 TWITCH_CHANNEL=your_twitch_channel_name
 TWITCH_BOT_USERNAME=PromptIslandBot
 ```
+
+### Token refresh (critical — tokens expire after ~60 days)
+
+A static `TWITCH_BOT_ACCESS_TOKEN` in `.env` will silently stop working mid-season with no obvious error. Token refresh must be automatic.
+
+`twitchio` provides an `event_token_expired` callback. Wire it to refresh and persist the new token:
+
+```python
+# In twitch_bot.py
+@bot.event()
+async def event_token_expired():
+    """Called by twitchio when the access token expires."""
+    new_token = await _refresh_access_token(
+        client_id=os.getenv("TWITCH_CLIENT_ID"),
+        client_secret=os.getenv("TWITCH_CLIENT_SECRET"),
+        refresh_token=os.getenv("TWITCH_BOT_REFRESH_TOKEN"),
+    )
+    # Write new access token back to .env so next restart uses it
+    _update_env_file("TWITCH_BOT_ACCESS_TOKEN", new_token["access_token"])
+    _update_env_file("TWITCH_BOT_REFRESH_TOKEN", new_token["refresh_token"])
+    return new_token["access_token"]
+```
+
+**Initial token generation:** Run `scripts/twitch_auth.py` once — a small CLI that performs the OAuth Authorization Code flow, prints the access + refresh tokens, and writes them to `.env`. This is a one-time setup step documented in the pre-stream checklist.
 
 Add to `frontend/.env.local`:
 ```bash
