@@ -82,20 +82,45 @@ Uses `twitchio` library (`pip install twitchio`).
 
 ## Phase 6b — Audience Influence (Twitch → Game)
 
-### Channel Point Redemptions → Game Events
+Two trigger mechanisms: **Channel Point redemptions** (free to use, viewer earns points by watching) and **Bits cheers** (virtual currency, real money equivalent).
 
-Set up these custom channel point rewards on your Twitch channel:
+### Channel Point Redemptions
+
+Set up these custom rewards on your Twitch channel dashboard:
 
 | Reward name | Cost | Effect |
 |---|---|---|
-| `Force a Revote` | 5000 pts | Tribal Council revote — current votes are discarded and agents vote again |
-| `Give Agent a Hint` | 2000 pts | Delivers a strategic hint to a random non-eliminated agent as a `speak_private` system message |
-| `Ask an Agent` | 1000 pts | Redeemer's Twitch username + message is delivered to the agent of their choice as a `system_event` in the next Morning Chat |
-| `Chaos Mode` | 10000 pts | Activates chaos_agent (Jordan) for one extra unscripted action during the next Scramble |
+| `Ask an Agent` | 1000 pts | Redeemer's username + message delivered to chosen agent as `system_event` in next Morning Chat |
+| `Give Agent a Hint` | 2000 pts | Strategic hint injected as `speak_private` to a random non-eliminated agent |
+| `Force a Revote` | 5000 pts | Tribal Council revote — current votes discarded, agents vote again |
+| `Chaos Mode` | 10000 pts | Jordan gets one extra unscripted action in next Scramble |
+
+### Bits Cheers (IRC-based, no Twitch Extension needed)
+
+Bits cheers arrive as normal IRC chat messages with a `cheerNNN` prefix (e.g. `cheer500 Let's go!`). Parse the amount and map to game events:
+
+| Bits threshold | Effect |
+|---|---|
+| 100 | Random agent receives an encouraging boost (positive `system_event`) |
+| 500 | Same as `Give Agent a Hint` channel point reward |
+| 1000 | Same as `Force a Revote` |
+| 5000 | Same as `Chaos Mode` |
+| 10000 | Viewer names an agent — that agent is immune from the next elimination vote |
+
+**Parsing logic in `twitch_bot.py`:**
+```python
+import re
+
+def parse_bits(message: str) -> int:
+    """Sum all cheer amounts in a single message (viewers can stack e.g. cheer100 cheer200)."""
+    return sum(int(n) for n in re.findall(r'cheer(\d+)', message, re.IGNORECASE))
+```
+
+Bits events flow through the same `AudienceBridge` as channel point redemptions — same queue, same GameEngine integration points.
 
 **`src/integrations/twitch/eventsub.py`**
 
-Uses Twitch EventSub via WebSocket (preferred over webhook for dev — no ngrok needed).
+Uses Twitch EventSub via WebSocket (no ngrok needed — WebSocket transport works without a public URL).
 
 ```python
 # EventSubClient class
@@ -108,19 +133,21 @@ Uses Twitch EventSub via WebSocket (preferred over webhook for dev — no ngrok 
 
 ```python
 # AudienceBridge class
-# - on_redemption(reward_title, user_name, user_input)
-#   → maps reward_title to a pending game action
-#   → stores in a thread-safe queue (queue.Queue)
+# - on_redemption(reward_title, user_name, user_input)   ← channel points
+# - on_cheer(bits_amount, user_name, message)            ← Bits
+#   Both map to a pending AudienceAction stored in a thread-safe queue.Queue
 # - get_pending_actions() → list[AudienceAction]
-#   → called by GameEngine at the start of each phase
-# - AudienceAction dataclass: { action_type, payload, source_user }
+#   Called by GameEngine at phase boundaries only (never mid-phase)
+# - Per-day cooldowns enforced here (e.g. max 1 revote per day)
+# - AudienceAction dataclass: { action_type, payload, source_user, bits_amount }
 ```
 
 **GameEngine integration points:**
 
-- **Morning Chat start:** Pull `ask_agent` actions from bridge, inject as `system_event` ChatLog rows
+- **Morning Chat start:** Pull `ask_agent` actions, inject as `system_event` ChatLog rows
 - **Scramble start:** Pull `chaos_mode` actions, give Jordan an extra turn
-- **Tribal Council (before vote):** Pull `force_revote` flag — if set, after first vote tally, discard and revote once
+- **Tribal Council (before vote):** Pull `force_revote` flag — discard votes and revote once
+- **Tribal Council (before vote):** Pull `immunity` actions — mark named agent as immune this round
 - **Any phase:** Pull `give_hint` actions, inject as private `system_event` to target agent
 
 ---
