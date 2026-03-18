@@ -46,11 +46,11 @@ except ImportError:
 # Config
 # ---------------------------------------------------------------------------
 
-SPRITE_W    = 32
-SPRITE_H    = 48
+SPRITE_W    = 64
+SPRITE_H    = 96
 SHEET_COLS  = 4
 SHEET_ROWS  = 5
-PALETTE_COLORS = 16
+PALETTE_COLORS = 64
 
 REF_DIR    = Path("assets/references")
 OUTPUT_DIR = Path("frontend/public/sprites")
@@ -116,10 +116,8 @@ def resize_to_sprite(img: Image.Image) -> Image.Image:
         new_h = SPRITE_H
         new_w = max(1, int(SPRITE_H * img_ratio))
 
-    # Two-pass resize: smooth → pixelate
-    mid_scale = 4  # intermediate scale before final pixel snap
-    mid = img.resize((new_w * mid_scale, new_h * mid_scale), Image.LANCZOS)
-    small = mid.resize((new_w, new_h), Image.NEAREST)
+    # Single-pass LANCZOS downsample — preserves maximum detail at 64×96px
+    small = img.resize((new_w, new_h), Image.LANCZOS)
 
     # Centre on transparent SPRITE_W × SPRITE_H canvas
     canvas = Image.new("RGBA", (SPRITE_W, SPRITE_H), (0, 0, 0, 0))
@@ -182,9 +180,9 @@ def make_idle_frames(base: Image.Image) -> list[Image.Image]:
     At 32×48px this creates a gentle alive-looking animation.
     """
     f0 = base.copy()
-    f1 = _shift_rows(base, 0, 20, dy=2)   # upper body shifts up 2px (inhale)
+    f1 = _shift_rows(base, 0, 40, dy=4)   # upper body shifts up 4px (inhale)
     f2 = base.copy()                        # back to neutral
-    f3 = _shift_rows(base, 0, 20, dy=-2)  # upper body shifts down 2px (exhale)
+    f3 = _shift_rows(base, 0, 40, dy=-4)  # upper body shifts down 4px (exhale)
     return [f0, f1, f2, f3]
 
 
@@ -194,8 +192,8 @@ def make_walk_frames(base: Image.Image) -> list[Image.Image]:
     Simple but reads correctly as walking from top-down.
     """
     frames = []
-    leg_top  = 28
-    leg_offsets = [(0, -2), (0, 2), (0, 0), (0, 0)]  # (left_dy, right_dy) per frame
+    leg_top  = 56
+    leg_offsets = [(0, -4), (0, 4), (0, 0), (0, 0)]  # (left_dy, right_dy) per frame
 
     for l_dy, r_dy in leg_offsets:
         frame = base.copy()
@@ -231,8 +229,8 @@ def make_talk_frames(base: Image.Image) -> list[Image.Image]:
     Mouth rows are approximate for a top-down character at 16×24px.
     """
     frames = []
-    mouth_row   = 10
-    mouth_cols  = range(12, 20)   # cols 12-19
+    mouth_row   = 20
+    mouth_cols  = range(24, 40)   # cols 24-39
     mouth_dark  = (30, 15, 10, 255)   # dark mouth interior
     mouth_bg    = _sample_dominant_colour(base, mouth_cols, [mouth_row])
 
@@ -283,13 +281,13 @@ def make_react_frames(base: Image.Image) -> list[Image.Image]:
     # REACT_SHOCKED: add bright pixels at eye level (wide eyes)
     shocked = base.copy()
     d = ImageDraw.Draw(shocked)
-    d.rectangle((8, 5, 11, 8),   fill=(255, 255, 255, 255))
-    d.rectangle((20, 5, 23, 8),  fill=(255, 255, 255, 255))
+    d.rectangle((16, 10, 22, 16),  fill=(255, 255, 255, 255))
+    d.rectangle((40, 10, 46, 16),  fill=(255, 255, 255, 255))
 
     # REACT_SUSPICIOUS: darken one eye area (squint effect)
     suspicious = base.copy()
     d2 = ImageDraw.Draw(suspicious)
-    d2.rectangle((20, 5, 23, 8), fill=(20, 20, 20, 255))
+    d2.rectangle((40, 10, 46, 16), fill=(20, 20, 20, 255))
 
     return [happy, worried, shocked, suspicious]
 
@@ -311,8 +309,8 @@ def make_eliminated_frame(base: Image.Image) -> Image.Image:
             if base_px[x, y][3] < 128:
                 res_px[x, y] = (0, 0, 0, 0)
 
-    # Slump: shift lower body down 2px
-    result = _shift_rows(result, 24, SPRITE_H - 1, dy=-2)
+    # Slump: shift lower body down 4px
+    result = _shift_rows(result, 48, SPRITE_H - 1, dy=-4)
     return result
 
 # ---------------------------------------------------------------------------

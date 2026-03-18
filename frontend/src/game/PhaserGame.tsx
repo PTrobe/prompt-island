@@ -34,9 +34,9 @@ function PhaserCanvas({ onSceneReady }: PhaserGameProps) {
       width:  1280,
       height: 960,
       backgroundColor: '#1a3a5c',
-      pixelArt: true,
-      antialias: false,
-      roundPixels: true,
+      pixelArt: false,
+      antialias: true,
+      roundPixels: false,
       parent: containerRef.current,
       scene,
       scale: {
@@ -69,7 +69,7 @@ function PhaserCanvas({ onSceneReady }: PhaserGameProps) {
   return (
     <div
       ref={containerRef}
-      style={{ width: '100%', height: '100%', imageRendering: 'pixelated' }}
+      style={{ width: '100%', height: '100%' }}
     />
   );
 }

@@ -13,8 +13,8 @@ import Phaser from 'phaser';
 
 export type AnimState = 'idle' | 'walk' | 'talk' | 'react' | 'eliminated';
 
-const FRAME_W = 32;
-const FRAME_H = 48;
+const FRAME_W = 64;
+const FRAME_H = 96;
 
 // Row indices in the sprite sheet
 const ANIM_ROWS: Record<AnimState, number> = {
@@ -54,8 +54,8 @@ export class CharacterSprite {
     this.sprite.setDepth(config.y); // y-sort depth
 
     // Name label — small pixel font below feet
-    this.label = scene.add.text(config.x, config.y + 5, config.displayName, {
-      fontSize: '8px',
+    this.label = scene.add.text(config.x, config.y + 6, config.displayName, {
+      fontSize: '12px',
       color: '#ffffff',
       stroke: '#000000',
       strokeThickness: 2,
@@ -140,7 +140,7 @@ export class CharacterSprite {
     this.scene.tweens.add({
       targets: this.label,
       x,
-      y: y + 5,
+      y: y + 6,
       duration: 800,
       ease: 'Linear',
       onUpdate: () => {
@@ -159,14 +159,14 @@ export class CharacterSprite {
     const words = text.split(' ');
     const truncated = words.slice(0, 15).join(' ') + (words.length > 15 ? '…' : '');
 
-    const padding = 6;
-    const maxWidth = 120;
+    const padding = 8;
+    const maxWidth = 180;
 
     const bubble = this.scene.add.container(this.sprite.x, this.sprite.y - FRAME_H - 6);
     bubble.setDepth(1000);
 
     const textObj = this.scene.add.text(0, 0, truncated, {
-      fontSize: '8px',
+      fontSize: '12px',
       color: '#000000',
       wordWrap: { width: maxWidth - padding * 2 },
       resolution: 4,

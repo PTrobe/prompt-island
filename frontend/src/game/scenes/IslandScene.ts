@@ -11,12 +11,12 @@ import { LOCATIONS, LocationId, phaseToLocation } from '../map/IslandMap';
 
 // The 6 contestants — must match backend agent_ids exactly
 const AGENTS = [
-  { agentId: 'agent_01_machiavelli', displayName: 'Machiavelli' },
-  { agentId: 'agent_02_chaos',       displayName: 'Chaos'       },
-  { agentId: 'agent_03_empath',      displayName: 'Empath'      },
-  { agentId: 'agent_04_pedant',      displayName: 'Pedant'      },
-  { agentId: 'agent_05_paranoid',    displayName: 'Paranoid'    },
-  { agentId: 'agent_06_floater',     displayName: 'Floater'     },
+  { agentId: 'agent_01_machiavelli', displayName: 'Alex'   },
+  { agentId: 'agent_02_chaos',       displayName: 'Jordan' },
+  { agentId: 'agent_03_empath',      displayName: 'Sam'    },
+  { agentId: 'agent_04_pedant',      displayName: 'Morgan' },
+  { agentId: 'agent_05_paranoid',    displayName: 'Casey'  },
+  { agentId: 'agent_06_floater',     displayName: 'Riley'  },
 ];
 
 export class IslandScene extends Phaser.Scene {
@@ -37,8 +37,8 @@ export class IslandScene extends Phaser.Scene {
     // Character sprite sheets (64×120, frameWidth=16, frameHeight=24)
     for (const agent of AGENTS) {
       this.load.spritesheet(agent.agentId, `/sprites/${agent.agentId}_sheet.png`, {
-        frameWidth:  32,
-        frameHeight: 48,
+        frameWidth:  64,
+        frameHeight: 96,
       });
     }
   }
@@ -63,8 +63,9 @@ export class IslandScene extends Phaser.Scene {
     cam.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
     cam.setZoom(1);
 
-    // Centre on the full island
-    cam.centerOn(map.widthInPixels / 2, map.heightInPixels / 2);
+    // Start focused on the shelter where all agents begin
+    const shelterLoc = LOCATIONS.shelter;
+    cam.centerOn(shelterLoc.cx, shelterLoc.cy);
 
     // ── Characters ───────────────────────────────────────────────────────────
     // Place all agents at shelter formation spots
@@ -144,7 +145,7 @@ export class IslandScene extends Phaser.Scene {
       if (progress === 1) {
         this.time.delayedCall(holdMs, () => {
           cam.pan(cam.midPoint.x, cam.midPoint.y, 600, 'Power2');
-          cam.zoomTo(1, 600);
+          cam.zoomTo(2, 600);
         });
       }
     });

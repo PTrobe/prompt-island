@@ -31,7 +31,7 @@ except ImportError:
 # Configuration — must match generate_tiles.py TILE_MANIFEST indices
 # ---------------------------------------------------------------------------
 
-TILE_SIZE    = 32           # final pixel size of each tile in the tileset
+TILE_SIZE    = 64           # final pixel size of each tile in the tileset
 GRID_COLS    = 6            # tiles per row
 RAW_DIR      = Path("assets/tiles_raw")
 OUTPUT_PATH  = Path("frontend/public/tiles/island_tileset.png")
@@ -83,7 +83,7 @@ def main() -> None:
 
         # Nearest-neighbour downsample — critical for pixel art crispness.
         # Bilinear or lanczos would produce blurry anti-aliased edges.
-        tile_small = tile_img.resize((TILE_SIZE, TILE_SIZE), Image.NEAREST)
+        tile_small = tile_img.resize((TILE_SIZE, TILE_SIZE), Image.LANCZOS)
 
         tileset.paste(tile_small, (x, y))
         print(f"  [{idx:02d}] {name:20s} → grid ({col}, {row})  paste at ({x}px, {y}px)")

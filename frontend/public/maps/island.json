@@ -2435,23 +2435,23 @@
   "orientation": "orthogonal",
   "renderorder": "right-down",
   "tiledversion": "1.10.0",
-  "tileheight": 32,
+  "tileheight": 64,
   "tilesets": [
     {
       "columns": 6,
       "firstgid": 1,
       "image": "../tiles/island_tileset.png",
-      "imageheight": 96,
-      "imagewidth": 192,
+      "imageheight": 192,
+      "imagewidth": 384,
       "margin": 0,
       "name": "island_tileset",
       "spacing": 0,
       "tilecount": 18,
-      "tileheight": 32,
-      "tilewidth": 32
+      "tileheight": 64,
+      "tilewidth": 64
     }
   ],
-  "tilewidth": 32,
+  "tilewidth": 64,
   "type": "map",
   "version": "1.10",
   "width": 40,
@@ -2459,62 +2459,62 @@
     {
       "name": "location_camp_x",
       "type": "int",
-      "value": 448
+      "value": 896
     },
     {
       "name": "location_camp_y",
       "type": "int",
-      "value": 480
+      "value": 960
     },
     {
       "name": "location_beach_x",
       "type": "int",
-      "value": 640
+      "value": 1280
     },
     {
       "name": "location_beach_y",
       "type": "int",
-      "value": 160
+      "value": 320
     },
     {
       "name": "location_jungle_x",
       "type": "int",
-      "value": 256
+      "value": 512
     },
     {
       "name": "location_jungle_y",
       "type": "int",
-      "value": 384
+      "value": 768
     },
     {
       "name": "location_tribal_fire_x",
       "type": "int",
-      "value": 640
+      "value": 1280
     },
     {
       "name": "location_tribal_fire_y",
       "type": "int",
-      "value": 736
+      "value": 1472
     },
     {
       "name": "location_confessional_hut_x",
       "type": "int",
-      "value": 1024
+      "value": 2048
     },
     {
       "name": "location_confessional_hut_y",
       "type": "int",
-      "value": 384
+      "value": 768
     },
     {
       "name": "location_shelter_x",
       "type": "int",
-      "value": 416
+      "value": 832
     },
     {
       "name": "location_shelter_y",
       "type": "int",
-      "value": 640
+      "value": 1280
     }
   ]
 }
