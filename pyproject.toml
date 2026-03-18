@@ -24,6 +24,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     # Environment configuration
     "python-dotenv>=1.0",
+    # Image processing (sprite sheet composition, tile downsampling)
+    "pillow>=10.0",
 ]
 
 [project.optional-dependencies]
