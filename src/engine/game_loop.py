@@ -72,7 +72,7 @@ Contestant responses:
 
 # System prompt for the per-agent nightly summary (structured output → NightSummaryResult)
 _NIGHT_SUMMARY_PROMPT = """\
-You are {display_name} (ID: {agent_id}), a contestant on Prompt Island.
+You are {display_name}, a contestant on Prompt Island.
 Below is the complete transcript of Day {day} that you witnessed:
 
 {transcript}
@@ -354,6 +354,10 @@ class GameEngine:
                 continue  # This agent has exhausted their DMs today
 
             # Agent decides who to approach for a private chat
+            active_names_map = ", ".join(
+                f"{a.display_name} (id: {a.agent_id})"
+                for a in active if a.agent_id != initiator.agent_id
+            )
             initiation_action = self._run_agent_turn(
                 initiator,
                 phase,
@@ -361,7 +365,7 @@ class GameEngine:
                 extra_system_hint=(
                     "You are in The Scramble. Choose one other contestant to DM about "
                     "voting strategy. Set action_type='speak_private' and target_agent_id "
-                    f"to their agent_id. Active agents: {active_ids}"
+                    f"to their id. Other contestants: {active_names_map}"
                 ),
             )
 
@@ -397,7 +401,7 @@ class GameEngine:
                     phase,
                     force_action_type="speak_private",
                     extra_system_hint=(
-                        f"{initiator.agent_id} just messaged you privately: "
+                        f"{initiator.display_name} just messaged you privately: "
                         f'"{initiation_action.message}". Reply to them privately.'
                     ),
                 )
@@ -441,11 +445,20 @@ class GameEngine:
 
         vote_tally: Counter = Counter()
 
+        # Build a name→id reference for agents to use when voting
+        votable_agents = [a for a in active if a.agent_id in votable_ids]
         for agent in active:
-            # Build the eligibility string shown to the agent so it knows who to target
             targets_str = ", ".join(
-                aid for aid in votable_ids if aid != agent.agent_id
+                f"{a.display_name} (id: {a.agent_id})"
+                for a in votable_agents if a.agent_id != agent.agent_id
             )
+            immune_note = ""
+            if self._immune_agent_id:
+                immune_name = next(
+                    (a.display_name for a in active if a.agent_id == self._immune_agent_id),
+                    self._immune_agent_id,
+                )
+                immune_note = f"  NOTE: {immune_name} is immune and cannot be voted out."
 
             action = self._run_agent_turn(
                 agent,
@@ -453,13 +466,10 @@ class GameEngine:
                 force_action_type="vote",
                 extra_system_hint=(
                     "It is Tribal Council. You MUST cast a vote right now. "
-                    "Set action_type='vote', target_agent_id to the agent_id you are "
-                    "voting for, and message to your public reason. "
-                    f"Eligible targets: {targets_str or votable_ids}"
-                    + (
-                        f"  NOTE: {self._immune_agent_id} is immune and cannot be voted out."
-                        if self._immune_agent_id else ""
-                    )
+                    "Set action_type='vote', target_agent_id to the id of the contestant "
+                    "you are voting for, and message to your public reason. "
+                    f"Eligible targets: {targets_str}"
+                    + immune_note
                 ),
             )
 
@@ -582,7 +592,6 @@ class GameEngine:
                         "role": "user",
                         "content": _NIGHT_SUMMARY_PROMPT.format(
                             display_name=config.display_name,
-                            agent_id=agent.agent_id,
                             day=day,
                             transcript=transcript,
                         ),

@@ -206,11 +206,12 @@ class MemoryManager:
                     "content": log.message,
                 })
             else:
-                # Another agent speaking — prefix with their agent_id so the LLM
-                # can track who said what (display names are in the system prompt context)
+                # Another agent speaking — prefix with their display name so the LLM
+                # sees "Alex: ..." rather than "agent_01_machiavelli: ..."
+                speaker = log.agent.display_name if log.agent else log.agent_id
                 messages.append({
                     "role": "user",
-                    "content": f"{log.agent_id}: {log.message}",
+                    "content": f"{speaker}: {log.message}",
                 })
 
         return messages
