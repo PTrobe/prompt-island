@@ -81,7 +81,7 @@ export class IslandScene extends Phaser.Scene {
     // ── Camera ───────────────────────────────────────────────────────────────
     const cam = this.cameras.main;
     cam.setBounds(0, 0, W, H);
-    cam.setZoom(1);
+    cam.setZoom(2);
     cam.centerOn(LOCATIONS.shelter.cx, LOCATIONS.shelter.cy);
 
     // ── Characters ───────────────────────────────────────────────────────────
@@ -198,8 +198,8 @@ export class IslandScene extends Phaser.Scene {
 
   agentSpeak(agentId: string, text: string, durationMs = 4000): void {
     this.characters.get(agentId)?.say(text, durationMs);
-    // Zoom to speaker for the duration of speech then pull back
-    this.focusOnAgent(agentId, 1.8, durationMs);
+    // Zoom in to speaker for the duration of speech then pull back to base zoom
+    this.focusOnAgent(agentId, 3.5, durationMs);
   }
 
   agentReact(agentId: string): void {
@@ -209,32 +209,32 @@ export class IslandScene extends Phaser.Scene {
   eliminateAgent(agentId: string): void {
     const char = this.characters.get(agentId);
     if (!char) return;
-    // Zoom to the eliminated agent, then play exit
-    this.focusOnAgent(agentId, 2.2, 4500);
+    // Zoom in on the eliminated agent, then play exit
+    this.focusOnAgent(agentId, 4, 4500);
     this.time.delayedCall(500, () => char.eliminate());
   }
 
-  /** Zoom camera to a location, hold, then pull back to zoom=1. */
-  focusCamera(locationId: LocationId, zoomLevel = 2, holdMs = 3000): void {
+  /** Zoom camera to a location, hold, then pull back to base zoom (2). */
+  focusCamera(locationId: LocationId, zoomLevel = 3, holdMs = 3000): void {
     const loc = LOCATIONS[locationId];
     const cam = this.cameras.main;
     cam.pan(loc.cx, loc.cy, 600, 'Power2');
     cam.zoomTo(zoomLevel, 600, 'Linear', false, (_c: Phaser.Cameras.Scene2D.Camera, p: number) => {
       if (p === 1) {
-        this.time.delayedCall(holdMs, () => cam.zoomTo(1, 600));
+        this.time.delayedCall(holdMs, () => cam.zoomTo(2, 600));
       }
     });
   }
 
   /** Zoom camera to a specific agent's world position. */
-  focusOnAgent(agentId: string, zoomLevel = 1.8, holdMs = 3000): void {
+  focusOnAgent(agentId: string, zoomLevel = 3.5, holdMs = 3000): void {
     const char = this.characters.get(agentId);
     if (!char) return;
     const cam = this.cameras.main;
     cam.pan(char.x, char.y, 400, 'Power2');
     cam.zoomTo(zoomLevel, 400, 'Linear', false, (_c: Phaser.Cameras.Scene2D.Camera, p: number) => {
       if (p === 1) {
-        this.time.delayedCall(holdMs, () => cam.zoomTo(1, 500));
+        this.time.delayedCall(holdMs, () => cam.zoomTo(2, 500));
       }
     });
   }
@@ -246,7 +246,7 @@ export class IslandScene extends Phaser.Scene {
   confessionalSequence(agentId: string, text: string): void {
     this.moveAgentTo(agentId, 'confessional_hut', 0);
     this.time.delayedCall(900, () => {
-      this.focusCamera('confessional_hut', 2.5, 5000);
+      this.focusCamera('confessional_hut', 4, 5000);
       this.time.delayedCall(600, () => {
         this.characters.get(agentId)?.say(text, 4500);
       });
