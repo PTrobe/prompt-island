@@ -55,8 +55,8 @@ export class IslandScene extends Phaser.Scene {
 
     for (const agent of AGENTS) {
       this.load.spritesheet(agent.agentId, `/sprites/${agent.agentId}_sheet.png`, {
-        frameWidth:  64,
-        frameHeight: 96,
+        frameWidth:  32,
+        frameHeight: 32,
       });
     }
   }

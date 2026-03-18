@@ -34,9 +34,9 @@ function PhaserCanvas({ onSceneReady }: PhaserGameProps) {
       width:  1280,
       height: 960,
       backgroundColor: '#1a3a5c',
-      pixelArt: false,
-      antialias: true,
-      roundPixels: false,
+      pixelArt: true,
+      antialias: false,
+      roundPixels: true,
       parent: containerRef.current,
       scene,
       scale: {

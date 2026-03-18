@@ -13,8 +13,8 @@ import Phaser from 'phaser';
 
 export type AnimState = 'idle' | 'walk' | 'talk' | 'react' | 'eliminated';
 
-const FRAME_W = 64;
-const FRAME_H = 96;
+const FRAME_W = 32;
+const FRAME_H = 32;
 
 // Row indices in the sprite sheet
 const ANIM_ROWS: Record<AnimState, number> = {
