@@ -163,6 +163,15 @@ class EventBroadcaster:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def broadcast_from_thread(self, event: dict) -> None:
+        """
+        Push a raw event dict directly to WebSocket clients without writing to JSONL.
+        Used for structured events like vote_window_open / vote_update that are not
+        part of the chat transcript (no DB row, no JSONL line).
+        """
+        if self._ws is not None:
+            self._ws.broadcast_from_thread(event)
+
     def _write(self, event: dict) -> None:
         """Append event to JSONL file and push to WebSocket clients."""
         with self.output_file.open("a", encoding="utf-8") as f:

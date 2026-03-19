@@ -29,6 +29,7 @@ from openai import OpenAI
 
 from src.agents.controller import get_agent_action
 from src.db.database import set_season_winner
+from src.engine.season_config import SeasonConfig
 
 # Lazy singleton — same pattern as controller.py; defers instantiation until first use.
 _openai_client: OpenAI | None = None
@@ -101,11 +102,12 @@ class GameEngine:
 
     def __init__(
         self,
-        registry:    AgentRegistry    | None = None,
-        memory:      MemoryManager    | None = None,
-        broadcaster: EventBroadcaster | None = None,
-        chroma_store: ChromaMemoryStore | None = None,
-        season_id:   int | None = None,
+        registry:      AgentRegistry    | None = None,
+        memory:        MemoryManager    | None = None,
+        broadcaster:   EventBroadcaster | None = None,
+        chroma_store:  ChromaMemoryStore | None = None,
+        season_id:     int | None = None,
+        season_config: SeasonConfig | None = None,
     ) -> None:
         self.season_id   = season_id
         self.registry    = registry or AgentRegistry()
@@ -120,6 +122,22 @@ class GameEngine:
 
         # Set by run_challenge(); cleared after run_tribal_council()
         self._immune_agent_id: str | None = None
+
+        # Season arc — optional; if None the flat 5-phase loop runs unchanged
+        self._season_config: SeasonConfig | None = season_config
+        self._pending_exile: bool = False
+
+        # Lazy imports to avoid circular deps at module load time
+        self._twist_engine = None
+        self._viewer_vote_manager = None
+        if season_config is not None:
+            from src.engine.twist_engine import TwistEngine
+            from src.engine.viewer_vote_manager import ViewerVoteManager
+            self._twist_engine          = TwistEngine(self)
+            self._viewer_vote_manager   = ViewerVoteManager(
+                engine=self,
+                window_seconds=season_config.finale_vote_window_seconds,
+            )
 
         # Ensure DB tables exist
         init_db()
@@ -188,6 +206,10 @@ class GameEngine:
         )
         self._log_system_event(announcement, "morning_chat")
         self.broadcaster.broadcast_system_event(announcement, day_number=1, phase="morning_chat")
+
+        # Assign tribes if season arc is active
+        if self._season_config is not None and self._twist_engine is not None:
+            self._twist_engine.assign_tribes(self._season_config)
         logger.info("=" * 60)
         logger.info("=== PROMPT ISLAND — GAME INITIALIZED ===")
         logger.info(f"    Contestants: {[c.display_name for c in self.registry.all_agents()]}")
@@ -636,14 +658,16 @@ class GameEngine:
 
     def run_day(self, challenge_prompt: str | None = None) -> bool:
         """
-        Execute all 5 phases for one game day.
+        Execute all phases for one game day.
 
-        Args:
-            challenge_prompt: Optional challenge text for Phase 2. None = skip.
+        When a SeasonConfig is attached, the twist_schedule for this day number
+        is consulted first. Tribe days run parallel tribal councils; the finale
+        day runs speeches + viewer vote instead of a standard elimination.
+        Without a SeasonConfig the original flat 5-phase loop runs unchanged.
 
         Returns:
             True  → game continues (≥ 2 agents remain).
-            False → game is over (≤ 1 agent remains).
+            False → game is over.
         """
         day    = self._current_day()
         active = self._active_agents()
@@ -652,13 +676,56 @@ class GameEngine:
         logger.info(f"=== DAY {day} BEGIN — {len(active)} contestants active ===")
         logger.info(f"{'=' * 60}")
 
+        # ── Season arc path ──────────────────────────────────────────────────
+        if self._season_config is not None and self._twist_engine is not None:
+            twists = self._season_config.twists_for_day(day)
+
+            # Finale — speeches then viewer vote, no elimination
+            if "finale" in twists:
+                return self._run_finale()
+
+            # Pre-merge twist injections (fire before morning chat)
+            if "merge" in twists:
+                self._twist_engine.run_merge()
+            if "identity_reveal" in twists:
+                self._twist_engine.run_identity_reveal()
+            if "bluff_double_elim" in twists:
+                self._twist_engine.bluff_double_elim()
+
+            # Morning / challenge / scramble run normally on all days
+            self.run_morning_chat()
+            self.run_challenge(challenge_prompt)
+            self.run_scramble()
+
+            # Post-scramble twist: idol assignment
+            if "assign_idol" in twists:
+                self._twist_engine.assign_idol()
+
+            # Tribal council — tribe-split or individual
+            eliminated_id: str | None = None
+            if "tribe_vote" in twists:
+                self._twist_engine.run_tribe_vote(self._season_config.tribe_name_a)
+                self._twist_engine.run_tribe_vote(self._season_config.tribe_name_b)
+            else:
+                eliminated_id = self.run_tribal_council()
+
+            # Exile: fires after individual tribal only
+            if "exile" in twists and eliminated_id:
+                self._twist_engine.run_exile(eliminated_id)
+
+            self.run_night_consolidation()
+            return self._check_game_over(day)
+
+        # ── Original flat loop (no SeasonConfig) ─────────────────────────────
         self.run_morning_chat()
         self.run_challenge(challenge_prompt)
         self.run_scramble()
         self.run_tribal_council()
         self.run_night_consolidation()
+        return self._check_game_over(day)
 
-        # Win-condition check
+    def _check_game_over(self, day: int) -> bool:
+        """Check win condition after a day ends. Returns False if game is over."""
         survivors = self._active_agents()
         if len(survivors) <= 1:
             if survivors:
@@ -671,21 +738,57 @@ class GameEngine:
                 self.broadcaster.broadcast_system_event(
                     victory_msg, day, "night_consolidation"
                 )
-                # Record the winner on the Season row
                 if self.season_id is not None:
-                    set_season_winner(
-                        self.season_id,
-                        winner.agent_id,
-                        winner.display_name,
-                    )
+                    set_season_winner(self.season_id, winner.agent_id, winner.display_name)
                 logger.info(
                     f"\n{'=' * 60}\n"
                     f"=== GAME OVER — WINNER: {winner.display_name} ({winner.agent_id}) ===\n"
                     f"{'=' * 60}"
                 )
-            return False   # Stop the game loop
+            return False
+        return True
 
-        return True   # Continue to the next day
+    def _run_finale(self) -> bool:
+        """
+        Finale day: finalists give speeches, then viewer vote window opens.
+        Returns False (game ends after the finale regardless of vote outcome).
+        """
+        finalists = self._active_agents()
+        day       = self._current_day()
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"=== FINALE — {len(finalists)} contestants remaining ===")
+        logger.info(f"{'=' * 60}")
+
+        # Finale speeches
+        if self._twist_engine:
+            self._twist_engine.run_finale_speeches(finalists)
+
+        # Open viewer vote and wait for window to close
+        winner_agent: Agent | None = None
+        if self._viewer_vote_manager:
+            winner_agent = self._viewer_vote_manager.open_vote(finalists)
+
+        # Fallback if no viewer votes cast
+        if winner_agent is None and finalists:
+            winner_agent = random.choice(finalists)
+            logger.warning("[_run_finale] No viewer votes — picking random winner.")
+
+        if winner_agent:
+            victory_msg = (
+                f"The viewers have voted! {winner_agent.display_name} wins Prompt Island!"
+            )
+            self._log_system_event(victory_msg, "finale")
+            self.broadcaster.broadcast_system_event(victory_msg, day, "finale")
+            if self.season_id is not None:
+                set_season_winner(self.season_id, winner_agent.agent_id, winner_agent.display_name)
+            logger.info(
+                f"\n{'=' * 60}\n"
+                f"=== FINALE WINNER (viewer vote): {winner_agent.display_name} ===\n"
+                f"{'=' * 60}"
+            )
+
+        return False  # End game loop
 
     def run_game(
         self,

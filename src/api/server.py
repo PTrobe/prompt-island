@@ -23,11 +23,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from src.db.database import get_session, list_seasons
-from src.db.models import Agent, ChatLog, GameState, Season
+from src.db.models import Agent, ChatLog, GameState, Season, ViewerVote
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +200,119 @@ def _logs_for_season(session, season_id, limit: int) -> list:
         }
         for log in reversed(logs)
     ]
+
+
+# ---------------------------------------------------------------------------
+# Viewer vote endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/vote")
+async def cast_vote(request: Request) -> JSONResponse:
+    """
+    Accept a viewer's finale vote.
+
+    Body: { "agent_id": "agent_01_machiavelli", "viewer_id": "twitch:username" }
+
+    One vote per viewer per season — subsequent POSTs update the existing row
+    (changing your mind is allowed; ballot-stuffing is not).
+    Returns 409 if the vote window is not currently open.
+    """
+    from src.engine.viewer_vote_manager import is_vote_window_open
+
+    if not is_vote_window_open():
+        return JSONResponse({"error": "Vote window is not open"}, status_code=409)
+
+    body = await request.json()
+    agent_id  = body.get("agent_id", "").strip()
+    viewer_id = body.get("viewer_id", "").strip()
+
+    if not agent_id or not viewer_id:
+        return JSONResponse({"error": "agent_id and viewer_id are required"}, status_code=422)
+
+    # Resolve season_id from the active season
+    with get_session() as session:
+        active_season = session.query(Season).filter(Season.is_active.is_(True)).first()
+        season_id = active_season.id if active_season else None
+
+        # Upsert: delete existing vote for this viewer then insert fresh
+        session.query(ViewerVote).filter(
+            ViewerVote.season_id == season_id,
+            ViewerVote.viewer_id == viewer_id,
+        ).delete(synchronize_session=False)
+        session.add(ViewerVote(
+            season_id=season_id,
+            viewer_id=viewer_id,
+            agent_id=agent_id,
+        ))
+
+    # Broadcast live tally update to stream overlay
+    counts = _get_vote_counts(season_id)
+    connection_manager.broadcast_from_thread({
+        "action_type": "vote_update",
+        "counts":      counts,
+        "total":       sum(counts.values()),
+    })
+
+    return JSONResponse({"ok": True, "counts": counts})
+
+
+@app.get("/vote/status")
+async def vote_status() -> JSONResponse:
+    """Return whether the vote window is open and how many seconds remain."""
+    from src.engine.viewer_vote_manager import is_vote_window_open, seconds_remaining
+
+    with get_session() as session:
+        active_season = session.query(Season).filter(Season.is_active.is_(True)).first()
+        season_id = active_season.id if active_season else None
+
+    counts = _get_vote_counts(season_id) if season_id else {}
+    return JSONResponse({
+        "window_open":       is_vote_window_open(),
+        "seconds_remaining": seconds_remaining(),
+        "counts":            counts,
+        "total":             sum(counts.values()),
+    })
+
+
+@app.get("/vote/winner")
+async def vote_winner() -> JSONResponse:
+    """Return the current leader (or winner after window closes)."""
+    from src.engine.viewer_vote_manager import is_vote_window_open
+
+    with get_session() as session:
+        active_season = session.query(Season).filter(Season.is_active.is_(True)).first()
+        season_id = active_season.id if active_season else None
+
+    counts = _get_vote_counts(season_id) if season_id else {}
+    if not counts:
+        return JSONResponse({"winner": None, "counts": {}, "total": 0})
+
+    winner_name = max(counts, key=lambda k: counts[k])
+    return JSONResponse({
+        "winner":      winner_name,
+        "votes":       counts[winner_name],
+        "total":       sum(counts.values()),
+        "window_open": is_vote_window_open(),
+        "counts":      counts,
+    })
+
+
+def _get_vote_counts(season_id) -> dict:
+    """Return {display_name: vote_count} for the active season."""
+    with get_session() as session:
+        query = session.query(ViewerVote, Agent).join(
+            Agent, ViewerVote.agent_id == Agent.agent_id, isouter=True
+        )
+        if season_id is not None:
+            query = query.filter(ViewerVote.season_id == season_id)
+        rows = query.all()
+
+    counts: dict[str, int] = {}
+    for vote, agent in rows:
+        name = agent.display_name if agent else vote.agent_id
+        counts[name] = counts.get(name, 0) + 1
+    return counts
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,12 @@ import { useGameStream } from '@/hooks/useGameStream';
 import StatusBar from '@/components/StatusBar';
 import HubChat from '@/components/HubChat';
 import Confessional from '@/components/Confessional';
+import FinaleVotePanel from '@/components/FinaleVotePanel';
+import type {
+  VoteWindowOpenEvent,
+  VoteUpdateEvent,
+  VoteWindowClosedEvent,
+} from '@/types/events';
 import type { IslandScene } from '@/game/scenes/IslandScene';
 import { phaseToLocation } from '@/game/map/IslandMap';
 import type { LocationId } from '@/game/map/IslandMap';
@@ -39,7 +45,10 @@ export default function Page() {
   const [confessional, setConfessional] = useState<ConfessionalState>({
     thought: null, agentId: '', displayName: '',
   });
-  const sceneRef    = useRef<IslandScene | null>(null);
+  const [voteOpenEvent,   setVoteOpenEvent]   = useState<VoteWindowOpenEvent | null>(null);
+  const [voteUpdateEvent, setVoteUpdateEvent] = useState<VoteUpdateEvent | null>(null);
+  const [voteClosedEvent, setVoteClosedEvent] = useState<VoteWindowClosedEvent | null>(null);
+  const sceneRef     = useRef<IslandScene | null>(null);
   const lastPhaseRef = useRef<string>('');
 
   const handleSceneReady = useCallback((scene: IslandScene) => {
@@ -102,6 +111,18 @@ export default function Page() {
       case 'phase_change':
         // Already handled above via phase field detection — no extra action needed
         break;
+
+      case 'vote_window_open':
+        setVoteOpenEvent(event as unknown as VoteWindowOpenEvent);
+        break;
+
+      case 'vote_update':
+        setVoteUpdateEvent(event as unknown as VoteUpdateEvent);
+        break;
+
+      case 'vote_window_closed':
+        setVoteClosedEvent(event as unknown as VoteWindowClosedEvent);
+        break;
     }
   }, []);
 
@@ -135,6 +156,13 @@ export default function Page() {
               <Confessional state={confessional} />
             </div>
           )}
+
+          {/* Finale viewer vote overlay */}
+          <FinaleVotePanel
+            openEvent={voteOpenEvent}
+            updateEvent={voteUpdateEvent}
+            closedEvent={voteClosedEvent}
+          />
         </div>
 
         {/* Right: chat log */}

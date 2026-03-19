@@ -68,6 +68,41 @@ def init_db() -> None:
 # Migration helper — adds season_id columns to pre-season databases
 # ---------------------------------------------------------------------------
 
+def migrate_season_arc_columns() -> None:
+    """
+    Idempotent migration: add tribe/idol columns to agents and create the
+    viewer_votes table if absent. Safe to run on any existing DB.
+    """
+    with engine.connect() as conn:
+        # Add tribe, has_idol, idol_used to agents table
+        result = conn.execute(text("PRAGMA table_info(agents)"))
+        existing = {row[1] for row in result}
+        for col, definition in [
+            ("tribe",     "VARCHAR(32)"),
+            ("has_idol",  "BOOLEAN NOT NULL DEFAULT 0"),
+            ("idol_used", "BOOLEAN NOT NULL DEFAULT 0"),
+        ]:
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE agents ADD COLUMN {col} {definition}"))
+
+        # Create viewer_votes table if not present
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS viewer_votes (
+                vote_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                season_id INTEGER,
+                viewer_id VARCHAR(128) NOT NULL,
+                agent_id  VARCHAR(64)  NOT NULL,
+                voted_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        # Create unique index if not already present
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_viewer_votes_season_viewer
+            ON viewer_votes (season_id, viewer_id)
+        """))
+        conn.commit()
+
+
 def migrate_add_season_columns() -> None:
     """
     One-shot migration: add season_id column to existing tables if absent.

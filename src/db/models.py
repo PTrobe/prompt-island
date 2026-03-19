@@ -1,16 +1,17 @@
 """
 SQLAlchemy ORM models for the Prompt Island relational database.
 
-Five tables:
+Six tables:
   - Season       : Groups a full game run; multiple seasons coexist in one DB.
   - GameState    : Tracks day number, current phase, and simulation on/off status.
-  - Agent        : Each contestant's identity and elimination status.
+  - Agent        : Each contestant's identity, tribe, idol status, and elimination.
   - ChatLog      : Immutable chronological record of all public/private speech and events.
   - VoteHistory  : Official votes cast during each Tribal Council.
+  - ViewerVote   : Finale votes cast by Twitch viewers / overlay users.
 
-season_id is added to GameState, Agent, ChatLog, and VoteHistory as a plain
-integer column (no FK constraint) so composite PKs are not needed. Application-
-layer filtering by season_id is sufficient for correct multi-season queries.
+season_id is added to all tables as a plain integer column (no FK constraint)
+so composite PKs are not needed. Application-layer filtering by season_id is
+sufficient for correct multi-season queries.
 """
 
 from datetime import datetime
@@ -125,6 +126,11 @@ class Agent(Base):
     is_eliminated     = Column(Boolean, default=False, nullable=False)
     eliminated_on_day = Column(Integer, nullable=True)
 
+    # Season arc — tribe membership and hidden immunity idol
+    tribe     = Column(String(32), nullable=True)   # "terra" | "aqua" | None after merge
+    has_idol  = Column(Boolean, default=False, nullable=False)
+    idol_used = Column(Boolean, default=False, nullable=False)
+
     # Relationships — used for ORM queries; lazy-loaded by default
     chat_logs = relationship(
         "ChatLog",
@@ -212,6 +218,43 @@ class VoteHistory(Base):
             f"voter='{self.voter_agent_id}' → target='{self.target_agent_id}'>"
         )
 
+
+# ---------------------------------------------------------------------------
+# ViewerVote — finale votes cast by Twitch viewers / stream overlay users
+# ---------------------------------------------------------------------------
+
+class ViewerVote(Base):
+    """
+    Records each viewer's finale vote.
+
+    viewer_id is either "twitch:<username>" (from the IRC bot) or "ip:<address>"
+    (from the overlay button). One vote per viewer per season is enforced via the
+    unique index below; the API upserts on (season_id, viewer_id) so changing
+    your vote is allowed, but ballot-stuffing is not.
+    """
+
+    __tablename__ = "viewer_votes"
+
+    vote_id   = Column(Integer, primary_key=True, autoincrement=True)
+    season_id = Column(Integer, nullable=True, index=True)
+    viewer_id = Column(String(128), nullable=False)   # "twitch:username" | "ip:1.2.3.4"
+    agent_id  = Column(String(64), nullable=False)    # agent voted for
+    voted_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self) -> str:
+        return (
+            f"<ViewerVote id={self.vote_id} season={self.season_id} "
+            f"viewer='{self.viewer_id}' → agent='{self.agent_id}'>"
+        )
+
+
+# Unique constraint: one vote per viewer per season (enforced at DB level)
+Index(
+    "ix_viewer_votes_season_viewer",
+    ViewerVote.season_id,
+    ViewerVote.viewer_id,
+    unique=True,
+)
 
 # Composite index for fast per-season day lookups on the largest table
 Index("ix_chat_logs_season_day", ChatLog.season_id, ChatLog.day_number)

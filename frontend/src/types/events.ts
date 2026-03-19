@@ -6,7 +6,10 @@ export type ActionType =
   | 'agent_move'
   | 'camera_focus'
   | 'phase_change'
-  | 'elimination';
+  | 'elimination'
+  | 'vote_window_open'
+  | 'vote_window_closed'
+  | 'vote_update';
 
 export interface GameEvent {
   timestamp: string;
@@ -60,4 +63,30 @@ export interface CameraFocusEvent {
   location: string;
   zoom?: number;
   hold_ms?: number;
+}
+
+/** Broadcast when the finale viewer vote window opens. */
+export interface VoteWindowOpenEvent {
+  action_type: 'vote_window_open';
+  day_number: number;
+  phase: 'finale';
+  finalists: Array<{ agent_id: string; display_name: string }>;
+  window_seconds: number;
+  closes_at_unix: number;
+}
+
+/** Broadcast when a new vote arrives (live tally update). */
+export interface VoteUpdateEvent {
+  action_type: 'vote_update';
+  counts: Record<string, number>;   // display_name → count
+  total: number;
+}
+
+/** Broadcast when the voting window closes. */
+export interface VoteWindowClosedEvent {
+  action_type: 'vote_window_closed';
+  day_number: number;
+  phase: 'finale';
+  counts: Record<string, number>;
+  total: number;
 }
